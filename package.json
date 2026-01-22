@@ -1,0 +1,26 @@
+{
+  "name": "yeollin-cms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open, extensible CMS framework inspired by Tauri",
+  "workspaces": [
+    "packages/*",
+    "plugins/*"
+  ],
+  "scripts": {
+    "dev": "bun --filter '*' dev",
+    "dev:api": "cargo run -p yeollin-app",
+    "dev:web": "bun --filter @yeollin/app dev",
+    "build": "bun --filter '*' build",
+    "build:api": "cargo build --release -p yeollin-app",
+    "build:web": "bun --filter @yeollin/app build",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "check": "cargo check --workspace"
+  },
+  "devDependencies": {
+    "typescript": "^5.9",
+    "oxlint": "^1.41",
+    "eslint-plugin-devup": "^2.0"
+  }
+}
