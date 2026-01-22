@@ -7,6 +7,7 @@ mod routes;
 
 yeollin_plugin::yeollin_plugin! {
     name: "dashboard",
+    author: "Yeollin CMS Team",
     description: "Built-in dashboard for Example CMS",
 }
 
