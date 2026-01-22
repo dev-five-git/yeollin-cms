@@ -109,19 +109,25 @@ pub async fn run_with_plugins(output_dir: &Path, plugins: &[PluginFrontend], for
     // 1. Extract or prepare app template
     prepare_output_dir(output_dir, force)?;
     
-    // 2. Extract embedded template
+    // 2. Create .gitignore in .yeollin/ directory
+    if let Some(yeollin_dir) = output_dir.parent() {
+        let gitignore_path = yeollin_dir.join(".gitignore");
+        fs::write(&gitignore_path, "*\n")?;
+    }
+    
+    // 3. Extract embedded template
     AppTemplate::extract_to(output_dir)?;
     info!("Extracted app template to {}", output_dir.display());
 
-    // 3. Merge plugin dependencies into output package.json
+    // 4. Merge plugin dependencies into output package.json
     merge_plugin_dependencies(output_dir, plugins)?;
     info!("Merged plugin dependencies");
 
-    // 4. Link plugin frontends
+    // 5. Link plugin frontends
     link_plugins(output_dir, plugins)?;
     info!("Linked {} plugin frontends", plugins.len());
 
-    // 5. Generate plugin manifest for Next.js
+    // 6. Generate plugin manifest for Next.js
     generate_plugin_manifest(output_dir, plugins)?;
     info!("Generated plugin manifest");
 
