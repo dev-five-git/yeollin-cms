@@ -10,7 +10,7 @@ use tokio::process::Command;
 use tracing::{info, debug};
 use serde::Deserialize;
 
-use super::prebuild::{self, find_project_root, find_current_plugin_dir, PluginFrontend};
+use super::prebuild::{find_project_root, find_current_plugin_dir, PluginFrontend, run_with_plugins_mode};
 
 /// Plugin info from binary export
 #[derive(Debug, Deserialize)]
@@ -108,17 +108,13 @@ pub struct DevArgs {
     #[arg(long)]
     pub skip_prebuild: bool,
 
-    /// Port for Next.js dev server
-    #[arg(long, default_value = "3000")]
-    pub frontend_port: u16,
-
-    /// Skip API server (frontend only)
-    #[arg(long)]
-    pub no_api: bool,
-
-    /// Port for API server
+    /// Main CMS port (single entry point)
     #[arg(long, default_value = "3001")]
-    pub api_port: u16,
+    pub port: u16,
+
+    /// Internal port for Next.js dev server (proxied through main port)
+    #[arg(long, default_value = "3000")]
+    pub internal_frontend_port: u16,
 }
 
 pub async fn run(args: DevArgs) -> Result<()> {
@@ -180,10 +176,10 @@ pub async fn run(args: DevArgs) -> Result<()> {
         vec![]
     };
 
-    // 3. Run prebuild if not skipped
+    // 3. Run prebuild if not skipped (use copy mode for dev - symlinks don't work with Turbopack)
     if !args.skip_prebuild {
-        info!("Running prebuild...");
-        prebuild::run_with_plugins(&yeollin_app_dir, &plugins, false).await?;
+        info!("Running prebuild (copy mode for dev)...");
+        run_with_plugins_mode(&yeollin_app_dir, &plugins, false, true).await?;
     }
 
     // 2. Install dependencies if needed
@@ -211,71 +207,83 @@ pub async fn run(args: DevArgs) -> Result<()> {
         "yeollin-app".to_string()
     };
 
-    info!("Starting development servers...");
-    info!("  Frontend: http://localhost:{}", args.frontend_port);
-    if !args.no_api {
-        info!("  API:      http://localhost:{} ({})", args.api_port, api_info);
-    }
+    info!("Starting development server (single port mode)...");
+    info!("  CMS:      http://localhost:{} ({})", args.port, api_info);
+    info!("  Frontend: proxied from internal port {}", args.internal_frontend_port);
 
-    // 3. Start Next.js dev server
+    // 3. Start Next.js dev server on internal port
     let mut next_cmd = Command::new("bun");
     next_cmd
         .current_dir(&yeollin_app_dir)
-        .args(["run", "dev"])
+        .args(["run", "dev", "--port", &args.internal_frontend_port.to_string()])
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true);  // Kill Next.js when handle is dropped
 
-    let next_handle = next_cmd.spawn()?;
+    let mut next_handle = next_cmd.spawn()?;
 
-    // 4. Start API server (optional)
-    let cargo_handle = if !args.no_api {
-        let mut cargo_cmd = Command::new("cargo");
-        
-        // If inside a plugin, run plugin's API; otherwise run main app
-        if let Some(ref plugin) = plugin_dir {
-            let api_dir = plugin.join("api");
-            if api_dir.exists() {
-                cargo_cmd.current_dir(&api_dir).args(["run"]);
-            } else {
-                cargo_cmd.current_dir(&project_dir).args(["run", "-p", "yeollin-app"]);
-            }
+    // Wait for Next.js to be ready
+    info!("Waiting for Next.js to start...");
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    // 4. Start API server with dev proxy
+    let mut cargo_cmd = Command::new("cargo");
+    
+    // If inside a plugin, run plugin's API; otherwise run main app
+    if let Some(ref plugin) = plugin_dir {
+        let api_dir = plugin.join("api");
+        if api_dir.exists() {
+            cargo_cmd.current_dir(&api_dir).args(["run"]);
         } else {
             cargo_cmd.current_dir(&project_dir).args(["run", "-p", "yeollin-app"]);
         }
-        
-        cargo_cmd
-            .env("PORT", args.api_port.to_string())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
-        Some(cargo_cmd.spawn()?)
     } else {
-        None
-    };
+        cargo_cmd.current_dir(&project_dir).args(["run", "-p", "yeollin-app"]);
+    }
+    
+    cargo_cmd
+        .env("PORT", args.port.to_string())
+        .env("YEOLLIN_DEV_PROXY", args.internal_frontend_port.to_string())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true);  // Kill API when handle is dropped
+    
+    let mut cargo_handle = cargo_cmd.spawn()?;
 
-    info!("Development servers started. Press Ctrl+C to stop.");
+    info!("Development server started. Press Ctrl+C to stop.");
 
-    // Wait for processes
-    match cargo_handle {
-        Some(cargo) => {
-            tokio::select! {
-                result = next_handle.wait_with_output() => {
-                    if let Err(e) = result {
-                        tracing::error!("Next.js dev server error: {}", e);
+    // Wait for EITHER process to exit, then clean up both
+    tokio::select! {
+        result = next_handle.wait() => {
+            match result {
+                Ok(status) => {
+                    if !status.success() {
+                        tracing::error!("Next.js dev server exited with status: {}", status);
                     }
                 }
-                result = cargo.wait_with_output() => {
-                    if let Err(e) = result {
-                        tracing::error!("API server error: {}", e);
-                    }
+                Err(e) => {
+                    tracing::error!("Next.js dev server error: {}", e);
                 }
             }
+            // Kill API server
+            let _ = cargo_handle.kill().await;
         }
-        None => {
-            if let Err(e) = next_handle.wait_with_output().await {
-                tracing::error!("Next.js dev server error: {}", e);
+        result = cargo_handle.wait() => {
+            match result {
+                Ok(status) => {
+                    if !status.success() {
+                        tracing::error!("API server exited with status: {}", status);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("API server error: {}", e);
+                }
             }
+            // Kill Next.js server
+            let _ = next_handle.kill().await;
         }
     }
 
+    info!("Development server stopped.");
     Ok(())
 }

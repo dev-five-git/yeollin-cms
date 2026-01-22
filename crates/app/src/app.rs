@@ -10,6 +10,7 @@ use yeollin_plugin::PluginMetadata;
 use crate::state::AppState;
 use crate::server::Server;
 use crate::static_files::static_router;
+use crate::dev_proxy::dev_proxy_router;
 
 /// Shared menus for Extension layer
 #[derive(Clone)]
@@ -81,6 +82,7 @@ pub struct YeollinAppBuilder {
     host: String,
     port: u16,
     static_dir: Option<&'static Dir<'static>>,
+    dev_proxy_port: Option<u16>,
 }
 
 impl YeollinAppBuilder {
@@ -90,6 +92,7 @@ impl YeollinAppBuilder {
             host: "0.0.0.0".to_string(),
             port: 3001,
             static_dir: None,
+            dev_proxy_port: None,
         }
     }
 
@@ -137,6 +140,23 @@ impl YeollinAppBuilder {
         self
     }
 
+    /// Set the dev proxy port (for development mode)
+    /// 
+    /// When set, the server will proxy non-API requests to the Next.js dev server
+    /// running on the specified port. This is mutually exclusive with `with_static`.
+    /// 
+    /// # Example
+    /// 
+    /// ```rust,ignore
+    /// let app = yeollin::app()
+    ///     .with_dev_proxy(3000)  // Proxy to Next.js dev server on port 3000
+    ///     .build();
+    /// ```
+    pub fn with_dev_proxy(mut self, port: u16) -> Self {
+        self.dev_proxy_port = Some(port);
+        self
+    }
+
     /// Build the application
     pub fn build(self) -> YeollinApp {
         let mut router = Router::new();
@@ -181,8 +201,11 @@ impl YeollinAppBuilder {
             .route("/api/menus", axum::routing::get(get_menus))
             .layer(Extension(shared_menus));
 
-        // Add static file serving as fallback if configured
-        if let Some(static_dir) = self.static_dir {
+        // Add static file serving or dev proxy as fallback
+        if let Some(dev_proxy_port) = self.dev_proxy_port {
+            router = router.merge(dev_proxy_router(dev_proxy_port));
+            tracing::info!("Dev proxy enabled -> http://127.0.0.1:{}", dev_proxy_port);
+        } else if let Some(static_dir) = self.static_dir {
             router = router.merge(static_router(static_dir));
             tracing::info!("Static file serving enabled");
         }

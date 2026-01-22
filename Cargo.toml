@@ -20,7 +20,7 @@ repository = "https://github.com/dev-five-git/yeollin-cms"
 tokio = { version = "1", features = ["full"] }
 
 # Web framework
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
@@ -37,6 +37,14 @@ vespera = "0.1"
 # Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP client for dev proxy
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+hyper = "1"
+
+# WebSocket for HMR proxy
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
 
 # Utils
 thiserror = "2"
