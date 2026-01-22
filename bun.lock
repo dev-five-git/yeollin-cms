@@ -42,12 +42,25 @@
       "dependencies": {
         "@devup-ui/react": "^1.0",
       },
+      "devDependencies": {
+        "@types/react": "^19",
+        "next": "^16",
+        "react": "^19",
+        "typescript": "^5.9",
+      },
     },
     "plugins/example-plugin": {
       "name": "@yeollin-plugin/example-plugin",
       "version": "0.1.0",
       "dependencies": {
         "dayjs": "^1.11.19",
+      },
+      "devDependencies": {
+        "@devup-ui/react": "^1.0",
+        "@types/react": "^19",
+        "next": "^16",
+        "react": "^19",
+        "typescript": "^5.9",
       },
     },
   },

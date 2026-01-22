@@ -4,9 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "cargo run -p yeollin-cli -- dev",
-    "build": "cargo run -p yeollin-cli -- build"
+    "build": "cargo run -p yeollin-cli -- build",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@devup-ui/react": "^1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "react": "^19",
+    "next": "^16",
+    "typescript": "^5.9"
   }
 }
