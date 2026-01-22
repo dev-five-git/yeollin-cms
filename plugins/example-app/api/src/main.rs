@@ -4,6 +4,7 @@
 //! - Built-in plugin (from lib.rs)
 //! - External plugin (example-plugin crate)
 //! - Embedded static files in release builds
+//! - Dev proxy mode for development
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -27,19 +28,33 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting Example CMS Application");
 
+    // Get port from environment or use default
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3001);
+
     let mut builder = yeollin::app()
         .host("0.0.0.0")
-        .port(3001)
+        .port(port)
         // Built-in plugin (from this crate's lib.rs)
         .register_plugin(example_app::metadata())
         // External plugin (separate crate)
         .register_plugin(example_plugin::metadata());
 
-    // Add embedded static files for production (release builds)
-    #[cfg(not(debug_assertions))]
-    {
-        builder = builder.with_static(&STATIC_DIR);
-        tracing::info!("Embedded static files enabled (release build)");
+    // Check for dev proxy mode (development)
+    if let Ok(dev_proxy_port) = std::env::var("YEOLLIN_DEV_PROXY") {
+        if let Ok(proxy_port) = dev_proxy_port.parse::<u16>() {
+            builder = builder.with_dev_proxy(proxy_port);
+            tracing::info!("Dev proxy mode enabled -> http://127.0.0.1:{}", proxy_port);
+        }
+    } else {
+        // Add embedded static files for production (release builds)
+        #[cfg(not(debug_assertions))]
+        {
+            builder = builder.with_static(&STATIC_DIR);
+            tracing::info!("Embedded static files enabled (release build)");
+        }
     }
 
     let app = builder.build();
