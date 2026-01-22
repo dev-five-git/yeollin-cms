@@ -101,7 +101,6 @@ out/
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
     #[test]
     fn test_template_has_required_files() {

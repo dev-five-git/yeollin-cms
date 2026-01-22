@@ -16,15 +16,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Starting Yeollin CMS");
 
     // Build the application
-    let mut builder = yeollin::app()
+    let builder = yeollin::app()
         .host("0.0.0.0")
         .port(3001);
-
-    // Register example plugin if feature is enabled
-    #[cfg(feature = "example-plugin")]
-    {
-        builder = builder.register_plugin(example_plugin::metadata());
-    }
 
     let app = builder.build();
 

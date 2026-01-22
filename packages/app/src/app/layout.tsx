@@ -2,8 +2,8 @@ import { ThemeScript } from '@devup-ui/react'
 import { Box, Flex } from '@devup-ui/react'
 import type { Metadata } from 'next'
 
+import { Sidebar } from '@/components/layout/Sidebar'
 import { Providers } from '@/components/providers'
-import { Sidebar } from '@/components/sidebar'
 
 export const metadata: Metadata = {
   title: 'Yeollin CMS',

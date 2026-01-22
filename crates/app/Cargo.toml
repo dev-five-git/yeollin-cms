@@ -37,10 +37,3 @@ tracing-subscriber = { workspace = true }
 # Utils
 anyhow = { workspace = true }
 include_dir = { workspace = true }
-
-# Example plugin (for demonstration)
-example-plugin = { path = "../../plugins/example-plugin/api", optional = true }
-
-[features]
-default = ["example-plugin"]
-example-plugin = ["dep:example-plugin"]

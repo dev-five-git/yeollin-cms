@@ -101,7 +101,14 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
 }
 
 /// Run prebuild with an explicit list of plugins
+/// 
+/// If `copy_mode` is true, files are copied instead of symlinked (needed for production builds on Windows)
 pub async fn run_with_plugins(output_dir: &Path, plugins: &[PluginFrontend], force: bool) -> Result<()> {
+    run_with_plugins_mode(output_dir, plugins, force, false).await
+}
+
+/// Run prebuild with explicit copy mode control
+pub async fn run_with_plugins_mode(output_dir: &Path, plugins: &[PluginFrontend], force: bool, copy_mode: bool) -> Result<()> {
     for plugin in plugins {
         debug!("  - {} at {}", plugin.name, plugin.app_path.display());
     }
@@ -123,8 +130,8 @@ pub async fn run_with_plugins(output_dir: &Path, plugins: &[PluginFrontend], for
     merge_plugin_dependencies(output_dir, plugins)?;
     info!("Merged plugin dependencies");
 
-    // 5. Link plugin frontends
-    link_plugins(output_dir, plugins)?;
+    // 5. Link or copy plugin frontends
+    link_plugins(output_dir, plugins, copy_mode)?;
     info!("Linked {} plugin frontends", plugins.len());
 
     // 6. Generate plugin manifest for Next.js
@@ -275,8 +282,10 @@ fn merge_plugin_dependencies(output_dir: &Path, plugins: &[PluginFrontend]) -> R
     Ok(())
 }
 
-/// Link plugin frontend directories into the app
-fn link_plugins(output_dir: &Path, plugins: &[PluginFrontend]) -> Result<()> {
+/// Link or copy plugin frontend directories into the app
+/// 
+/// If `copy_mode` is true, always copies files (needed for production builds)
+fn link_plugins(output_dir: &Path, plugins: &[PluginFrontend], copy_mode: bool) -> Result<()> {
     // Plugins go under src/app/(plugins)/ for Next.js App Router
     let plugins_app_dir = output_dir.join("src").join("app").join("(plugins)");
     fs::create_dir_all(&plugins_app_dir)?;
@@ -284,68 +293,203 @@ fn link_plugins(output_dir: &Path, plugins: &[PluginFrontend]) -> Result<()> {
     for plugin in plugins {
         let link_path = plugins_app_dir.join(&plugin.name);
         
-        // Create symlink (or copy on Windows if symlink fails)
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&plugin.app_path, &link_path)
-                .with_context(|| format!("Failed to symlink plugin: {}", plugin.name))?;
-        }
-        
-        #[cfg(windows)]
-        {
-            // Try symlink first, fall back to junction, then copy
-            if std::os::windows::fs::symlink_dir(&plugin.app_path, &link_path).is_err() {
-                // Use junction as fallback (doesn't require admin)
-                let status = std::process::Command::new("cmd")
-                    .args(["/C", "mklink", "/J", 
-                        &link_path.to_string_lossy(), 
-                        &plugin.app_path.to_string_lossy()])
-                    .status();
-                
-                if status.is_err() || !status.unwrap().success() {
-                    // Last resort: copy
-                    copy_dir_recursive(&plugin.app_path, &link_path)?;
+        if copy_mode {
+            // Production: always copy
+            copy_dir_recursive(&plugin.app_path, &link_path)?;
+            debug!("Copied plugin '{}' to {}", plugin.name, link_path.display());
+        } else {
+            // Development: try symlink
+            #[cfg(unix)]
+            {
+                std::os::unix::fs::symlink(&plugin.app_path, &link_path)
+                    .with_context(|| format!("Failed to symlink plugin: {}", plugin.name))?;
+            }
+            
+            #[cfg(windows)]
+            {
+                // Try symlink first, fall back to junction
+                if std::os::windows::fs::symlink_dir(&plugin.app_path, &link_path).is_err() {
+                    // Use junction as fallback (doesn't require admin)
+                    let status = std::process::Command::new("cmd")
+                        .args(["/C", "mklink", "/J", 
+                            &link_path.to_string_lossy(), 
+                            &plugin.app_path.to_string_lossy()])
+                        .status();
+                    
+                    if status.is_err() || !status.unwrap().success() {
+                        // Last resort: copy
+                        copy_dir_recursive(&plugin.app_path, &link_path)?;
+                    }
                 }
             }
+            debug!("Linked plugin '{}' to {}", plugin.name, link_path.display());
         }
-
-        debug!("Linked plugin '{}' to {}", plugin.name, link_path.display());
     }
 
     Ok(())
 }
 
-/// Generate plugin manifest JSON for Next.js to consume
+/// Generate menus.json by scanning plugin directories for page.tsx files
 fn generate_plugin_manifest(output_dir: &Path, plugins: &[PluginFrontend]) -> Result<()> {
     use serde::Serialize;
 
+    let mut menu_items: Vec<serde_json::Value> = vec![];
+
+    for plugin in plugins {
+        // Scan plugin's app directory for page.tsx files
+        let routes = scan_routes(&plugin.name, &plugin.app_path)?;
+        
+        if routes.is_empty() {
+            continue;
+        }
+
+        // Build menu tree from routes
+        let plugin_menu = build_menu_tree(&plugin.name, routes);
+        menu_items.extend(plugin_menu);
+    }
+
+    // Write menus.json
+    let menus_path = output_dir.join("src").join("menus.json");
+    let json = serde_json::to_string_pretty(&menu_items)?;
+    fs::write(&menus_path, json)?;
+
+    // Also write plugins.json for backward compatibility
     #[derive(Serialize)]
     struct PluginManifest {
         plugins: Vec<PluginEntry>,
     }
-
     #[derive(Serialize)]
     struct PluginEntry {
         name: String,
         route_prefix: String,
     }
-
     let manifest = PluginManifest {
         plugins: plugins.iter().map(|p| PluginEntry {
             name: p.name.clone(),
             route_prefix: format!("/(plugins)/{}", p.name),
         }).collect(),
     };
-
     let manifest_path = output_dir.join("plugins.json");
-    let json = serde_json::to_string_pretty(&manifest)?;
-    fs::write(&manifest_path, json)?;
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
 
     Ok(())
 }
 
-/// Recursively copy a directory (fallback for Windows)
-#[cfg(windows)]
+/// Scan a directory recursively for page.tsx files and return route paths
+fn scan_routes(plugin_name: &str, app_dir: &Path) -> Result<Vec<String>> {
+    let mut routes = vec![];
+    scan_routes_recursive(plugin_name, app_dir, app_dir, &mut routes)?;
+    routes.sort();
+    Ok(routes)
+}
+
+fn scan_routes_recursive(plugin_name: &str, base: &Path, current: &Path, routes: &mut Vec<String>) -> Result<()> {
+    if !current.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        
+        if path.is_dir() {
+            scan_routes_recursive(plugin_name, base, &path, routes)?;
+        } else if path.file_name().map(|n| n == "page.tsx").unwrap_or(false) {
+            // Convert file path to URL route
+            let relative = path.parent().unwrap().strip_prefix(base).unwrap_or(Path::new(""));
+            let route = path_to_route(plugin_name, relative);
+            routes.push(route);
+        }
+    }
+
+    Ok(())
+}
+
+/// Convert filesystem path to URL route
+/// Adds plugin name prefix and removes route groups (parentheses)
+fn path_to_route(plugin_name: &str, path: &Path) -> String {
+    let parts: Vec<&str> = path
+        .components()
+        .filter_map(|c| {
+            if let std::path::Component::Normal(s) = c {
+                let s = s.to_str()?;
+                // Skip route groups (directories in parentheses)
+                if s.starts_with('(') && s.ends_with(')') {
+                    None
+                } else {
+                    Some(s)
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if parts.is_empty() {
+        // Root of plugin
+        format!("/{}", plugin_name)
+    } else {
+        format!("/{}/{}", plugin_name, parts.join("/"))
+    }
+}
+
+/// Build a menu tree from a list of routes
+fn build_menu_tree(plugin_name: &str, routes: Vec<String>) -> Vec<serde_json::Value> {
+    use serde_json::json;
+
+    // Find root route and child routes
+    let root_route = routes.iter().find(|r| {
+        let parts: Vec<&str> = r.trim_start_matches('/').split('/').filter(|s| !s.is_empty()).collect();
+        parts.len() <= 1
+    });
+
+    let children: Vec<serde_json::Value> = routes.iter()
+        .filter(|r| {
+            let parts: Vec<&str> = r.trim_start_matches('/').split('/').filter(|s| !s.is_empty()).collect();
+            parts.len() > 1
+        })
+        .map(|r| {
+            let parts: Vec<&str> = r.trim_start_matches('/').split('/').filter(|s| !s.is_empty()).collect();
+            let label = parts.last().unwrap_or(&"");
+            json!({
+                "id": format!("{}-{}", plugin_name, parts.join("-")),
+                "label": capitalize(label),
+                "path": r,
+                "children": []
+            })
+        })
+        .collect();
+
+    if let Some(root) = root_route {
+        vec![json!({
+            "id": plugin_name,
+            "label": capitalize(&plugin_name.replace('-', " ")),
+            "path": root,
+            "children": children
+        })]
+    } else if !children.is_empty() {
+        // No root page, just children
+        children
+    } else {
+        vec![]
+    }
+}
+
+/// Capitalize first letter of each word
+fn capitalize(s: &str) -> String {
+    s.split(|c| c == '-' || c == '_' || c == ' ')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Recursively copy a directory
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
     

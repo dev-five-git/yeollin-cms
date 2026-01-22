@@ -42,6 +42,13 @@ fn serve_static_file(dir: &'static Dir<'static>, path: &str) -> impl IntoRespons
         return response;
     }
     
+    // Handle Next.js RSC path encoding: dots become slashes in __next.* paths
+    // URL: example-plugin/settings/__next.!KHBsdWdpbnMp.example-plugin.!KGV4YW1wbGUp.txt
+    // File: example-plugin/settings/__next.!KHBsdWdpbnMp/example-plugin/!KGV4YW1wbGUp.txt
+    if let Some(response) = try_serve_rsc_file(dir, path) {
+        return response;
+    }
+    
     // Try with .html extension (for Next.js static routes)
     let html_path = format!("{}.html", path);
     if let Some(response) = try_serve_file(dir, &html_path) {
@@ -65,6 +72,40 @@ fn serve_static_file(dir: &'static Dir<'static>, path: &str) -> impl IntoRespons
     
     // Ultimate fallback
     (StatusCode::NOT_FOUND, "Not Found").into_response()
+}
+
+/// Try to serve a Next.js RSC file with path encoding conversion
+/// Converts dots to slashes in __next.* file paths
+fn try_serve_rsc_file(dir: &'static Dir<'static>, path: &str) -> Option<Response<Body>> {
+    // Find __next. segment in the path
+    let next_idx = path.find("__next.")?;
+    
+    // Split into prefix (route path) and RSC filename
+    let (prefix, rsc_part) = path.split_at(next_idx);
+    
+    // Check if this is an RSC .txt file
+    if !rsc_part.ends_with(".txt") {
+        return None;
+    }
+    
+    // Remove .txt extension for processing
+    let rsc_without_ext = rsc_part.trim_end_matches(".txt");
+    
+    // Convert dots to slashes after __next. prefix
+    // But preserve the initial __next.!xxx segment
+    if rsc_without_ext.contains(".!") {
+        // Has encoded segments like __next.!KHBsdWdpbnMp.example-plugin.!KGV4YW1wbGUp
+        let converted = rsc_without_ext.replacen(".", "/", 100);
+        // Restore __next. prefix
+        let converted = format!("__next.{}", converted.trim_start_matches("__next/"));
+        let full_path = format!("{}{}.txt", prefix, converted);
+        
+        if let Some(response) = try_serve_file(dir, &full_path) {
+            return Some(response);
+        }
+    }
+    
+    None
 }
 
 /// Try to serve a file at the given path

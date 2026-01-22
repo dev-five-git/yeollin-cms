@@ -21,5 +21,6 @@ pub use frontend::*;
 pub use metadata::*;
 
 // Re-export for convenience
+pub use include_dir;
 pub use vespera;
 pub use yeollin_core;
