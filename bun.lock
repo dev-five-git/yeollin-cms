@@ -38,6 +38,9 @@
     "plugins/example-app": {
       "name": "@yeollin-plugin/example-app",
       "version": "0.1.0",
+      "dependencies": {
+        "@devup-ui/react": "^1.0",
+      },
     },
     "plugins/example-plugin": {
       "name": "@yeollin-plugin/example-plugin",
