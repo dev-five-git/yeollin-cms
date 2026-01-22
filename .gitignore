@@ -38,3 +38,4 @@ openapi.json
 # Rust build artifacts only (Cargo.lock is tracked for apps)
 
 .yeollin/
+tsconfig.tsbuildinfo

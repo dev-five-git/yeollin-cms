@@ -33,6 +33,18 @@ pub struct PluginFrontend {
     pub app_path: PathBuf,     // Frontend assets (plugins/<name>/app/)
 }
 
+/// Full plugin info for plugins.json (exported from binary)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PluginInfo {
+    pub name: String,
+    pub version: String,
+    pub author: Option<String>,
+    pub description: Option<String>,
+    pub license: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frontend_path: Option<String>,
+}
+
 /// Find project root by walking up directories
 /// Looks for: plugins/ directory or workspace Cargo.toml
 pub fn find_project_root() -> Option<PathBuf> {
@@ -104,11 +116,23 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
 /// 
 /// If `copy_mode` is true, files are copied instead of symlinked (needed for production builds on Windows)
 pub async fn run_with_plugins(output_dir: &Path, plugins: &[PluginFrontend], force: bool) -> Result<()> {
-    run_with_plugins_mode(output_dir, plugins, force, false).await
+    run_with_plugins_mode(output_dir, plugins, &[], force, false).await
 }
 
 /// Run prebuild with explicit copy mode control
-pub async fn run_with_plugins_mode(output_dir: &Path, plugins: &[PluginFrontend], force: bool, copy_mode: bool) -> Result<()> {
+/// 
+/// * `output_dir` - Where to write the generated app
+/// * `plugins` - Frontend plugins to link/copy
+/// * `all_plugins` - Full plugin info for plugins.json (from binary export)
+/// * `force` - Force overwrite existing output
+/// * `copy_mode` - Use copy instead of symlink (needed for production)
+pub async fn run_with_plugins_mode(
+    output_dir: &Path, 
+    plugins: &[PluginFrontend], 
+    all_plugins: &[PluginInfo],
+    force: bool, 
+    copy_mode: bool
+) -> Result<()> {
     for plugin in plugins {
         debug!("  - {} at {}", plugin.name, plugin.app_path.display());
     }
@@ -137,6 +161,10 @@ pub async fn run_with_plugins_mode(output_dir: &Path, plugins: &[PluginFrontend]
     // 6. Generate plugin manifest for Next.js
     generate_plugin_manifest(output_dir, plugins)?;
     info!("Generated plugin manifest");
+
+    // 7. Write full plugins.json for settings page (with all metadata)
+    write_plugins_json(output_dir, all_plugins)?;
+    info!("Generated plugins.json");
 
     info!("Prebuild complete!");
     Ok(())
@@ -487,6 +515,19 @@ fn capitalize(s: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Write full plugins.json for settings page (with all metadata from binary export)
+fn write_plugins_json(output_dir: &Path, all_plugins: &[PluginInfo]) -> Result<()> {
+    if all_plugins.is_empty() {
+        return Ok(());
+    }
+
+    let plugins_json_path = output_dir.join("src").join("plugins.json");
+    let json = serde_json::to_string_pretty(&all_plugins)?;
+    fs::write(&plugins_json_path, json)?;
+    
+    Ok(())
 }
 
 /// Recursively copy a directory

@@ -23,13 +23,21 @@ pub struct HealthResponse {
     pub version: String,
 }
 
-/// Plugin info for export
-#[derive(Serialize, Clone)]
+/// Plugin info for export and API
+#[derive(Serialize, Clone, Schema)]
 pub struct PluginInfo {
     pub name: String,
     pub version: String,
+    pub author: Option<String>,
+    pub description: Option<String>,
+    pub license: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub frontend_path: Option<String>,
 }
+
+/// Shared plugins for Extension layer
+#[derive(Clone)]
+pub struct SharedPlugins(pub Arc<Vec<PluginInfo>>);
 
 /// Yeollin CMS Application
 pub struct YeollinApp {
@@ -175,6 +183,9 @@ impl YeollinAppBuilder {
             plugins.push(PluginInfo {
                 name: plugin.name.to_string(),
                 version: plugin.version.to_string(),
+                author: plugin.author.map(|s| s.to_string()),
+                description: plugin.description.map(|s| s.to_string()),
+                license: plugin.license.map(|s| s.to_string()),
                 frontend_path: plugin.frontend_path.map(|s| s.to_string()),
             });
 
@@ -194,12 +205,15 @@ impl YeollinAppBuilder {
 
         let state = AppState::new(self.host, self.port, menus.clone());
         let shared_menus = SharedMenus(Arc::new(menus.clone()));
+        let shared_plugins = SharedPlugins(Arc::new(plugins.clone()));
 
         // Add core routes with vespera
         router = router
             .route("/health", axum::routing::get(health_check))
             .route("/api/menus", axum::routing::get(get_menus))
-            .layer(Extension(shared_menus));
+            .route("/api/plugins", axum::routing::get(get_plugins))
+            .layer(Extension(shared_menus))
+            .layer(Extension(shared_plugins));
 
         // Add static file serving or dev proxy as fallback
         if let Some(dev_proxy_port) = self.dev_proxy_port {
@@ -234,4 +248,21 @@ pub async fn get_menus(
     Extension(menus): Extension<SharedMenus>,
 ) -> Json<Vec<MenuConfig>> {
     Json((*menus.0).clone())
+}
+
+/// Get all registered plugins
+#[vespera::route(get, path = "/api/plugins", tags = ["system"])]
+pub async fn get_plugins(
+    Extension(plugins): Extension<SharedPlugins>,
+) -> Json<Vec<PluginInfo>> {
+    // Return plugins without frontend_path (internal info)
+    let public_plugins: Vec<PluginInfo> = plugins.0.iter().map(|p| PluginInfo {
+        name: p.name.clone(),
+        version: p.version.clone(),
+        author: p.author.clone(),
+        description: p.description.clone(),
+        license: p.license.clone(),
+        frontend_path: None,
+    }).collect();
+    Json(public_plugins)
 }

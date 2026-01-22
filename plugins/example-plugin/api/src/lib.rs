@@ -7,6 +7,7 @@ mod routes;
 
 yeollin_plugin::yeollin_plugin! {
     name: "example-plugin",
+    author: "DevFive",
     description: "Example plugin demonstrating Yeollin CMS plugin architecture",
 }
 

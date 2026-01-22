@@ -11,6 +11,18 @@ interface MenuItem {
   children?: MenuItem[]
 }
 
+/** System menu items (always present) */
+const systemMenuItems: MenuItem[] = [
+  {
+    id: 'settings',
+    label: 'Settings',
+    path: '/settings',
+    children: [
+      { id: 'settings-plugins', label: 'Plugins', path: '/settings/plugins' },
+    ],
+  },
+]
+
 /**
  * Sidebar component that reads menu items from generated menus.json at build time.
  * Server Component - no 'use client' needed.
@@ -19,7 +31,7 @@ export async function Sidebar() {
   // Read menus.json at build time (SSG)
   const menusPath = path.join(process.cwd(), 'src', 'menus.json')
   const menusContent = await readFile(menusPath, 'utf-8')
-  const menuItems: MenuItem[] = JSON.parse(menusContent)
+  const pluginMenuItems: MenuItem[] = JSON.parse(menusContent)
 
   return (
     <Box
@@ -28,6 +40,8 @@ export async function Sidebar() {
       h="100vh"
       p={4}
       w="260px"
+      display="flex"
+      flexDirection="column"
     >
       {/* Logo */}
       <Flex alignItems="center" gap={2} mb={6} px={2}>
@@ -47,12 +61,24 @@ export async function Sidebar() {
         <Text typography="subheading">Yeollin CMS</Text>
       </Flex>
 
-      {/* Navigation */}
-      <Flex flexDirection="column" gap={1}>
-        {menuItems.map((item) => (
+      {/* Plugin Navigation */}
+      <Flex flexDirection="column" gap={1} flex={1}>
+        {pluginMenuItems.map((item) => (
           <NavItem key={item.id} item={item} />
         ))}
       </Flex>
+
+      {/* System Navigation */}
+      <Box borderTop="1px solid $border" pt={4} mt={4}>
+        <Text typography="label" color="$textTertiary" px={2} mb={2}>
+          System
+        </Text>
+        <Flex flexDirection="column" gap={1}>
+          {systemMenuItems.map((item) => (
+            <NavItem key={item.id} item={item} />
+          ))}
+        </Flex>
+      </Box>
     </Box>
   )
 }

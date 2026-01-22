@@ -5,16 +5,19 @@
 /// This macro automatically:
 /// - Creates the `metadata()` function with vespera router
 /// - Sets up `frontend_path` for prebuild
+/// - Uses `CARGO_PKG_VERSION` for version
+/// - Uses `CARGO_PKG_LICENSE` for license (if available)
 ///
 /// # Examples
 ///
-/// ## Basic usage (uses vespera::vespera!() for routes)
+/// ## Full usage
 ///
 /// ```rust,ignore
 /// mod routes;
 ///
 /// yeollin_plugin::yeollin_plugin! {
 ///     name: "my-plugin",
+///     author: "Your Name",
 ///     description: "My awesome plugin",
 /// }
 /// ```
@@ -26,6 +29,7 @@
 ///
 /// yeollin_plugin::yeollin_plugin! {
 ///     name: "my-plugin",
+///     author: "Your Name",
 ///     description: "My awesome plugin",
 ///     router: custom_router(),
 /// }
@@ -38,13 +42,98 @@
 ///
 /// yeollin_plugin::yeollin_plugin! {
 ///     name: "my-plugin",
+///     author: "Your Name",
 ///     description: "My awesome plugin",
 ///     frontend: false,
 /// }
 /// ```
 #[macro_export]
 macro_rules! yeollin_plugin {
-    // With description, default vespera router
+    // Full: name, author, description, default vespera router
+    (
+        name: $name:literal,
+        author: $author:literal,
+        description: $desc:literal $(,)?
+    ) => {
+        use $crate::{vespera, FrontendAssets, PluginMetadata};
+
+        /// Plugin metadata entry point
+        pub fn metadata() -> PluginMetadata {
+            PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
+                .author($author)
+                .description($desc)
+                .license(env!("CARGO_PKG_LICENSE"))
+                .router(vespera::vespera!())
+                .frontend(FrontendAssets::empty())
+                .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
+                .build()
+        }
+    };
+
+    // Full: name, author, description, custom router
+    (
+        name: $name:literal,
+        author: $author:literal,
+        description: $desc:literal,
+        router: $router:expr $(,)?
+    ) => {
+        use $crate::{FrontendAssets, PluginMetadata};
+
+        /// Plugin metadata entry point
+        pub fn metadata() -> PluginMetadata {
+            PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
+                .author($author)
+                .description($desc)
+                .license(env!("CARGO_PKG_LICENSE"))
+                .router($router)
+                .frontend(FrontendAssets::empty())
+                .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
+                .build()
+        }
+    };
+
+    // API-only: name, author, description, no frontend, default vespera router
+    (
+        name: $name:literal,
+        author: $author:literal,
+        description: $desc:literal,
+        frontend: false $(,)?
+    ) => {
+        use $crate::{vespera, PluginMetadata};
+
+        /// Plugin metadata entry point
+        pub fn metadata() -> PluginMetadata {
+            PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
+                .author($author)
+                .description($desc)
+                .license(env!("CARGO_PKG_LICENSE"))
+                .router(vespera::vespera!())
+                .build()
+        }
+    };
+
+    // API-only: name, author, description, custom router, no frontend
+    (
+        name: $name:literal,
+        author: $author:literal,
+        description: $desc:literal,
+        router: $router:expr,
+        frontend: false $(,)?
+    ) => {
+        use $crate::PluginMetadata;
+
+        /// Plugin metadata entry point
+        pub fn metadata() -> PluginMetadata {
+            PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
+                .author($author)
+                .description($desc)
+                .license(env!("CARGO_PKG_LICENSE"))
+                .router($router)
+                .build()
+        }
+    };
+
+    // Legacy: name, description only (no author), default vespera router
     (
         name: $name:literal,
         description: $desc:literal $(,)?
@@ -55,6 +144,7 @@ macro_rules! yeollin_plugin {
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
                 .description($desc)
+                .license(env!("CARGO_PKG_LICENSE"))
                 .router(vespera::vespera!())
                 .frontend(FrontendAssets::empty())
                 .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
@@ -62,7 +152,7 @@ macro_rules! yeollin_plugin {
         }
     };
 
-    // With description and custom router
+    // Legacy: name, description, custom router (no author)
     (
         name: $name:literal,
         description: $desc:literal,
@@ -74,6 +164,7 @@ macro_rules! yeollin_plugin {
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
                 .description($desc)
+                .license(env!("CARGO_PKG_LICENSE"))
                 .router($router)
                 .frontend(FrontendAssets::empty())
                 .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
@@ -81,7 +172,7 @@ macro_rules! yeollin_plugin {
         }
     };
 
-    // Without description, default vespera router
+    // Minimal: name only
     (
         name: $name:literal $(,)?
     ) => {
@@ -90,6 +181,7 @@ macro_rules! yeollin_plugin {
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
+                .license(env!("CARGO_PKG_LICENSE"))
                 .router(vespera::vespera!())
                 .frontend(FrontendAssets::empty())
                 .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
@@ -97,7 +189,7 @@ macro_rules! yeollin_plugin {
         }
     };
 
-    // Without description, custom router
+    // Minimal: name, custom router
     (
         name: $name:literal,
         router: $router:expr $(,)?
@@ -107,6 +199,7 @@ macro_rules! yeollin_plugin {
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
+                .license(env!("CARGO_PKG_LICENSE"))
                 .router($router)
                 .frontend(FrontendAssets::empty())
                 .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
@@ -114,7 +207,7 @@ macro_rules! yeollin_plugin {
         }
     };
 
-    // API-only plugin with description (no frontend), default vespera router
+    // Legacy API-only: name, description, no frontend (no author)
     (
         name: $name:literal,
         description: $desc:literal,
@@ -126,12 +219,13 @@ macro_rules! yeollin_plugin {
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
                 .description($desc)
+                .license(env!("CARGO_PKG_LICENSE"))
                 .router(vespera::vespera!())
                 .build()
         }
     };
 
-    // API-only plugin with description and custom router (no frontend)
+    // Legacy API-only: name, description, custom router, no frontend (no author)
     (
         name: $name:literal,
         description: $desc:literal,
@@ -144,6 +238,7 @@ macro_rules! yeollin_plugin {
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
                 .description($desc)
+                .license(env!("CARGO_PKG_LICENSE"))
                 .router($router)
                 .build()
         }

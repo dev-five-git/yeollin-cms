@@ -10,22 +10,25 @@ use tokio::process::Command;
 use tracing::{info, debug};
 use serde::Deserialize;
 
-use super::prebuild::{find_project_root, find_current_plugin_dir, PluginFrontend, run_with_plugins_mode};
+use super::prebuild::{find_project_root, find_current_plugin_dir, PluginFrontend, PluginInfo, run_with_plugins_mode};
 
 /// Plugin info from binary export
 #[derive(Debug, Deserialize)]
 struct ExportedPlugin {
     name: String,
-    #[allow(dead_code)]
     version: String,
+    author: Option<String>,
+    description: Option<String>,
+    license: Option<String>,
     frontend_path: Option<String>,
 }
 
 /// Export plugin list by running the binary with YEOLLIN_EXPORT_PLUGINS=1
+/// Returns (plugins for frontend linking, full plugin info for plugins.json)
 async fn export_plugins_from_binary(
     project_dir: &PathBuf,
     api_dir: Option<&PathBuf>,
-) -> Result<Vec<PluginFrontend>> {
+) -> Result<(Vec<PluginFrontend>, Vec<PluginInfo>)> {
     // Determine binary path
     let binary_name = if let Some(api) = api_dir {
         // Get crate name from Cargo.toml
@@ -78,23 +81,36 @@ async fn export_plugins_from_binary(
     let exported: Vec<ExportedPlugin> = serde_json::from_str(json_str)
         .context("Failed to parse plugin JSON")?;
 
-    // Convert to PluginFrontend
-    let plugins: Vec<PluginFrontend> = exported
-        .into_iter()
+    // Convert to PluginFrontend (for frontend linking)
+    let frontend_plugins: Vec<PluginFrontend> = exported
+        .iter()
         .filter_map(|p| {
-            let frontend_path = p.frontend_path?;
-            let app_path = PathBuf::from(&frontend_path).canonicalize().ok()?;
+            let frontend_path = p.frontend_path.as_ref()?;
+            let app_path = PathBuf::from(frontend_path).canonicalize().ok()?;
             let plugin_path = app_path.parent()?.to_path_buf();
             
             Some(PluginFrontend {
-                name: p.name,
+                name: p.name.clone(),
                 plugin_path,
                 app_path,
             })
         })
         .collect();
 
-    Ok(plugins)
+    // Convert to PluginInfo (for plugins.json)
+    let all_plugins: Vec<PluginInfo> = exported
+        .into_iter()
+        .map(|p| PluginInfo {
+            name: p.name,
+            version: p.version,
+            author: p.author,
+            description: p.description,
+            license: p.license,
+            frontend_path: p.frontend_path,
+        })
+        .collect();
+
+    Ok((frontend_plugins, all_plugins))
 }
 
 #[derive(Args)]
@@ -170,19 +186,19 @@ pub async fn run(args: BuildArgs) -> Result<()> {
     }
 
     // 2. Export plugins from binary
-    let plugins = if !args.skip_prebuild {
+    let (frontend_plugins, all_plugins) = if !args.skip_prebuild {
         info!("Discovering plugins from binary...");
-        let plugins = export_plugins_from_binary(&project_dir, api_dir.as_ref()).await?;
-        info!("Found {} registered plugins", plugins.len());
-        plugins
+        let (frontend_plugins, all_plugins) = export_plugins_from_binary(&project_dir, api_dir.as_ref()).await?;
+        info!("Found {} registered plugins", all_plugins.len());
+        (frontend_plugins, all_plugins)
     } else {
-        vec![]
+        (vec![], vec![])
     };
 
     // 3. Run prebuild if not skipped (use copy mode for production builds)
     if !args.skip_prebuild {
         info!("Running prebuild (copy mode for production)...");
-        run_with_plugins_mode(&yeollin_app_dir, &plugins, true, true).await?;
+        run_with_plugins_mode(&yeollin_app_dir, &frontend_plugins, &all_plugins, true, true).await?;
     }
 
     // 4. Install dependencies

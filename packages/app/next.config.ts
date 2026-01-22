@@ -13,11 +13,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
-
-  // Environment variables
-  env: {
-    API_URL: process.env.API_URL || 'http://localhost:3001',
-  },
+  reactCompiler: true,
 }
 
 // Chain plugins: devup-ui -> devup-api -> next config
