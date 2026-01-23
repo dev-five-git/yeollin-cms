@@ -1,7 +1,6 @@
 import devupApi from '@devup-api/next-plugin'
 import { DevupUI } from '@devup-ui/next-plugin'
 import type { NextConfig } from 'next'
-import path from 'path'
 
 const nextConfig: NextConfig = {
   // Enable React strict mode
