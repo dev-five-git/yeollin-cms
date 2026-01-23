@@ -10,11 +10,6 @@ const nextConfig: NextConfig = {
   // Static export for embedding in Rust binary
   output: 'export',
 
-  // Set turbopack root to parent of .yeollin/ to allow importing from app/ directory
-  // This enables proxy mode where we re-export from source files for instant HMR
-  // turbopack: {
-  //   root: path.resolve(__dirname, '..', '..'),
-  // },
   reactCompiler: true,
 }
 
