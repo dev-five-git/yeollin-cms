@@ -389,30 +389,17 @@ fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
 }
 
 /// Link or copy frontend directory into the app
-fn link_frontend(output_dir: &Path, frontend: &AppFrontend, copy_mode: bool) -> Result<()> {
+/// App frontend goes directly to (app)/ - no name prefix (routes at root level)
+/// This differs from plugins which get a name prefix for namespaced routes
+fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bool) -> Result<()> {
     // Frontend goes under src/app/(app)/ for Next.js App Router
+    // App contents go directly to (app)/ - routes at root level (e.g., /signin, not /example-app/signin)
     let app_dir = output_dir.join("src").join("app").join("(app)");
     fs::create_dir_all(&app_dir)?;
 
-    let link_path = app_dir.join(&frontend.name);
-
-    if copy_mode {
-        copy_dir_recursive(&frontend.app_path, &link_path)?;
-        debug!("Copied frontend to {}", link_path.display());
-    } else {
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&frontend.app_path, &link_path)?;
-        }
-
-        #[cfg(windows)]
-        {
-            if std::os::windows::fs::symlink_dir(&frontend.app_path, &link_path).is_err() {
-                copy_dir_recursive(&frontend.app_path, &link_path)?;
-            }
-        }
-        debug!("Linked frontend to {}", link_path.display());
-    }
+    // Copy contents of app frontend directly to (app)/ without app name prefix
+    copy_dir_contents(&frontend.app_path, &app_dir)?;
+    debug!("Copied app frontend contents to {}", app_dir.display());
 
     Ok(())
 }
@@ -496,7 +483,7 @@ fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Resul
             if dir_name_str.starts_with('(') && dir_name_str.ends_with(')') {
                 // Copy contents of route group to plugin destination
                 // e.g., (example)/items/* -> <plugin-name>/items/*
-                copy_route_group_contents(&entry_path, &dest_base)?;
+                copy_dir_contents(&entry_path, &dest_base)?;
                 info!("Copied plugin frontend: {} from {}", name, dir_name_str);
             }
         }
@@ -505,9 +492,9 @@ fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Resul
     Ok(())
 }
 
-/// Copy contents of a route group directory to destination
+/// Copy contents of a directory to destination (not the directory itself)
 /// Handles nested folders and files
-fn copy_route_group_contents(src: &Path, dst: &Path) -> Result<()> {
+fn copy_dir_contents(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
 
     for entry in fs::read_dir(src)? {
