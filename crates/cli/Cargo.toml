@@ -20,6 +20,7 @@ tokio = { workspace = true }
 include_dir = { workspace = true }
 walkdir = { workspace = true }
 fs_extra = { workspace = true }
+notify-debouncer-mini = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
