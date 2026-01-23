@@ -205,12 +205,14 @@ pub async fn run(args: DevArgs) -> Result<()> {
     let watcher_handle = if !args.copy_mode && frontend.is_some() {
         let frontend_clone = frontend.clone().unwrap();
         let yeollin_app_dir_clone = yeollin_app_dir.clone();
+        let menus_json_clone = menus_json.clone();
         let plugins_json_clone = plugins_json.clone();
 
         Some(tokio::spawn(async move {
             if let Err(e) = run_file_watcher(
                 frontend_clone,
                 yeollin_app_dir_clone,
+                menus_json_clone,
                 plugins_json_clone,
                 restart_tx,
             )
@@ -323,6 +325,7 @@ async fn start_rust_server(
 async fn run_file_watcher(
     frontend: AppFrontend,
     output_dir: PathBuf,
+    menus_json: Option<String>,
     plugins_json: Option<String>,
     restart_tx: tokio_mpsc::Sender<()>,
 ) -> Result<()> {
@@ -358,11 +361,11 @@ async fn run_file_watcher(
                 if should_rebuild && last_rebuild.elapsed() > debounce_duration {
                     info!("File structure changed ({:?}), updating proxies...", event.kind);
 
-                    // Re-run frontend linking
+                    // Re-run frontend linking (preserve menus and plugins)
                     if let Err(e) = run_prebuild(
                         &output_dir,
                         Some(&frontend),
-                        None, // menus don't change
+                        menus_json.as_deref(),
                         plugins_json.as_deref(),
                         false,
                         true, // use_proxy
