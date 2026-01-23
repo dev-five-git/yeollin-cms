@@ -4,6 +4,7 @@
 
 mod routes;
 
+use sea_orm::Database;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use yeollin::AuthConfig;
 
@@ -39,15 +40,18 @@ async fn main() -> anyhow::Result<()> {
     let auth_config =
         AuthConfig::new(jwt_secret).superadmin(superadmin_username.clone(), superadmin_password);
 
+    let db = Database::connect("sqlite://./db.sqlite").await?;
+
     tracing::info!(username = %superadmin_username, "Superadmin configured");
 
-    // Create vespera router with OpenAPI docs
-    // Public routes under (public) directory are auto-detected from prebuild
+    // Create app builder
     let app = yeollin::app()
         .host("0.0.0.0")
         .port(port)
         .with_auth(auth_config)
+        .with_database(db)
         .register_plugin(example_plugin::metadata())
+        .register_plugin(example_memo_plugin::metadata())
         .merge(vespera::vespera!(
             openapi = "openapi.json",
             title = "Example CMS API",

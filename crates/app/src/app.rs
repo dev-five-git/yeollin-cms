@@ -7,6 +7,7 @@ use crate::state::AppState;
 use crate::static_files::static_router;
 use axum::{middleware, Extension, Json, Router};
 use include_dir::Dir;
+use sea_orm::DatabaseConnection;
 use serde::Serialize;
 use std::sync::Arc;
 use vespera::Schema;
@@ -101,6 +102,7 @@ pub struct YeollinAppBuilder {
     static_dir: Option<&'static Dir<'static>>,
     dev_proxy_port: Option<u16>,
     auth_config: Option<AuthConfig>,
+    database: Option<DatabaseConnection>,
 }
 
 impl YeollinAppBuilder {
@@ -113,6 +115,7 @@ impl YeollinAppBuilder {
             static_dir: None,
             dev_proxy_port: None,
             auth_config: None,
+            database: None,
         }
     }
 
@@ -223,6 +226,28 @@ impl YeollinAppBuilder {
         self
     }
 
+    /// Configure database connection
+    ///
+    /// Sets up sea-orm database connection that will be available to all routes
+    /// via Axum's Extension layer. Plugins can access it by extracting
+    /// `Extension<DatabaseConnection>` in their handlers.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use sea_orm::Database;
+    ///
+    /// let db = Database::connect("postgres://...").await?;
+    ///
+    /// let app = yeollin::app()
+    ///     .with_database(db)
+    ///     .build();
+    /// ```
+    pub fn with_database(mut self, db: DatabaseConnection) -> Self {
+        self.database = Some(db);
+        self
+    }
+
     /// Build the application
     pub fn build(mut self) -> YeollinApp {
         // Auto-detect dev proxy from environment
@@ -286,6 +311,12 @@ impl YeollinAppBuilder {
             .route("/api/plugins", axum::routing::get(get_plugins))
             .layer(Extension(shared_menus))
             .layer(Extension(shared_plugins));
+
+        // Add database connection if configured
+        if let Some(db) = self.database {
+            router = router.layer(Extension(db));
+            tracing::info!("Database connection configured");
+        }
 
         // Add auth routes if auth is configured
         if let Some(ref auth_config) = self.auth_config {

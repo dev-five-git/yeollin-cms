@@ -41,6 +41,9 @@ pub use yeollin_auth::{
     TokenPair, TokenType,
 };
 
+// Re-export database utilities for plugins and apps
+pub use sea_orm::{Database, DatabaseConnection};
+
 /// Create a new Yeollin application builder
 pub fn app() -> YeollinAppBuilder {
     YeollinAppBuilder::new()

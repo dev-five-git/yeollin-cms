@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 yeollin-app = { path = "../../crates/app" }
 example-plugin = { path = "../../plugins/example-plugin" }
+example-memo-plugin = { path = "../../plugins/example-memo-plugin" }
 
 vespera = { workspace = true }
 serde = { workspace = true }
@@ -20,3 +21,4 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
+sea-orm = { workspace = true }

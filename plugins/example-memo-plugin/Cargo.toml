@@ -1,0 +1,15 @@
+[package]
+name = "example-memo-plugin"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Example memo plugin with database CRUD for Yeollin CMS"
+
+[dependencies]
+yeollin-plugin = { path = "../../crates/plugin" }
+vespera = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sea-orm = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
