@@ -3,22 +3,15 @@ name = "example-app"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Example CMS application using Yeollin"
+description = "Example CMS application using Yeollin with Vespera"
 
 [[bin]]
 name = "example-app"
 path = "src/main.rs"
 
-[lib]
-name = "example_app"
-path = "src/lib.rs"
-
 [dependencies]
 yeollin-app = { path = "../../../crates/app" }
-yeollin-plugin = { path = "../../../crates/plugin" }
-
-# External plugins
-example-plugin = { path = "../../example-plugin/api" }
+example-plugin = { path = "../../../plugins/example-plugin/api" }
 
 vespera = { workspace = true }
 serde = { workspace = true }

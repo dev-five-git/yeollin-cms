@@ -57,6 +57,8 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{vespera, FrontendAssets, PluginMetadata};
 
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
@@ -64,8 +66,8 @@ macro_rules! yeollin_plugin {
                 .description($desc)
                 .license(env!("CARGO_PKG_LICENSE"))
                 .router(vespera::vespera!())
-                .frontend(FrontendAssets::empty())
-                .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
+                .frontend(FrontendAssets::from_path($name, FRONTEND_PATH))
+                .frontend_path(FRONTEND_PATH)
                 .build()
         }
     };
@@ -79,6 +81,8 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{FrontendAssets, PluginMetadata};
 
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
@@ -86,8 +90,8 @@ macro_rules! yeollin_plugin {
                 .description($desc)
                 .license(env!("CARGO_PKG_LICENSE"))
                 .router($router)
-                .frontend(FrontendAssets::empty())
-                .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
+                .frontend(FrontendAssets::from_path($name, FRONTEND_PATH))
+                .frontend_path(FRONTEND_PATH)
                 .build()
         }
     };
@@ -140,14 +144,16 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{vespera, FrontendAssets, PluginMetadata};
 
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
                 .description($desc)
                 .license(env!("CARGO_PKG_LICENSE"))
                 .router(vespera::vespera!())
-                .frontend(FrontendAssets::empty())
-                .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
+                .frontend(FrontendAssets::from_path($name, FRONTEND_PATH))
+                .frontend_path(FRONTEND_PATH)
                 .build()
         }
     };
@@ -160,14 +166,16 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{FrontendAssets, PluginMetadata};
 
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
                 .description($desc)
                 .license(env!("CARGO_PKG_LICENSE"))
                 .router($router)
-                .frontend(FrontendAssets::empty())
-                .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
+                .frontend(FrontendAssets::from_path($name, FRONTEND_PATH))
+                .frontend_path(FRONTEND_PATH)
                 .build()
         }
     };
@@ -178,13 +186,15 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{vespera, FrontendAssets, PluginMetadata};
 
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
                 .license(env!("CARGO_PKG_LICENSE"))
                 .router(vespera::vespera!())
-                .frontend(FrontendAssets::empty())
-                .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
+                .frontend(FrontendAssets::from_path($name, FRONTEND_PATH))
+                .frontend_path(FRONTEND_PATH)
                 .build()
         }
     };
@@ -196,13 +206,15 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{FrontendAssets, PluginMetadata};
 
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
             PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
                 .license(env!("CARGO_PKG_LICENSE"))
                 .router($router)
-                .frontend(FrontendAssets::empty())
-                .frontend_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../app"))
+                .frontend(FrontendAssets::from_path($name, FRONTEND_PATH))
+                .frontend_path(FRONTEND_PATH)
                 .build()
         }
     };

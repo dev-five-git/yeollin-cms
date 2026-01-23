@@ -1,21 +1,19 @@
 //! Prebuild command
 //!
-//! Extracts the app template and links plugin frontend assets.
+//! Extracts the app template and links frontend assets from current directory.
 
 use std::path::{Path, PathBuf};
 use std::fs;
+use std::process::Stdio;
 use clap::Args;
 use anyhow::{Context, Result};
+use tokio::process::Command;
 use tracing::{info, debug};
 
 use crate::template::AppTemplate;
 
 #[derive(Args)]
 pub struct PrebuildArgs {
-    /// Project root directory (auto-detected if not specified)
-    #[arg(short, long)]
-    pub project_dir: Option<PathBuf>,
-
     /// Output directory for the generated app (default: .yeollin/app)
     #[arg(short, long)]
     pub output_dir: Option<PathBuf>,
@@ -25,119 +23,186 @@ pub struct PrebuildArgs {
     pub force: bool,
 }
 
-/// Plugin frontend info discovered from filesystem
+/// App info discovered from current directory
 #[derive(Debug)]
-pub struct PluginFrontend {
+pub struct AppFrontend {
     pub name: String,
-    pub plugin_path: PathBuf,  // Plugin root (plugins/<name>/)
-    pub app_path: PathBuf,     // Frontend assets (plugins/<name>/app/)
+    pub app_path: PathBuf,  // Frontend assets (./app/)
 }
 
-/// Full plugin info for plugins.json (exported from binary)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PluginInfo {
-    pub name: String,
-    pub version: String,
-    pub author: Option<String>,
-    pub description: Option<String>,
-    pub license: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub frontend_path: Option<String>,
-}
-
-/// Find project root by walking up directories
-/// Looks for: plugins/ directory or workspace Cargo.toml
-pub fn find_project_root() -> Option<PathBuf> {
-    let mut current = std::env::current_dir().ok()?;
-    
-    loop {
-        // Check for plugins/ directory (primary indicator)
-        if current.join("plugins").is_dir() {
-            return Some(current);
-        }
-        
-        // Check for workspace Cargo.toml
-        let cargo_toml = current.join("Cargo.toml");
-        if cargo_toml.exists() {
-            if let Ok(content) = fs::read_to_string(&cargo_toml) {
-                if content.contains("[workspace]") {
-                    return Some(current);
-                }
-            }
-        }
-        
-        // Move up one directory
-        if !current.pop() {
-            return None;
-        }
-    }
-}
-
-/// Detect if current directory is inside a plugin directory
-/// Returns the plugin directory path if found
-pub fn find_current_plugin_dir() -> Option<PathBuf> {
+/// Detect app structure in current directory
+/// Returns AppFrontend if app/ directory exists
+pub fn detect_current_app() -> Option<AppFrontend> {
     let current = std::env::current_dir().ok()?;
-    let project_root = find_project_root()?;
-    let plugins_dir = project_root.join("plugins");
+    let app_path = current.join("app");
     
-    // Check if current dir is under plugins/
-    if current.starts_with(&plugins_dir) {
-        // Get the plugin directory (first level under plugins/)
-        let relative = current.strip_prefix(&plugins_dir).ok()?;
-        let plugin_name = relative.components().next()?;
-        return Some(plugins_dir.join(plugin_name));
+    if app_path.exists() && app_path.is_dir() {
+        let name = current.file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "app".to_string());
+        
+        Some(AppFrontend {
+            name,
+            app_path,
+        })
+    } else {
+        None
     }
+}
+
+/// Get binary name from api/ directory's Cargo.toml
+pub fn get_binary_name(api_dir: &Path) -> Result<String> {
+    let cargo_toml = api_dir.join("Cargo.toml");
+    if cargo_toml.exists() {
+        let content = fs::read_to_string(&cargo_toml)?;
+        // Look for [[bin]] name first
+        if let Some(bin_name) = content.lines()
+            .skip_while(|l| !l.contains("[[bin]]"))
+            .find(|l| l.trim().starts_with("name"))
+            .and_then(|l| l.split('"').nth(1))
+        {
+            return Ok(bin_name.to_string());
+        }
+        // Fall back to package name
+        if let Some(pkg_name) = content.lines()
+            .find(|l| l.trim().starts_with("name"))
+            .and_then(|l| l.split('"').nth(1))
+        {
+            return Ok(pkg_name.to_string());
+        }
+    }
+    Ok("yeollin-app".to_string())
+}
+
+/// Find binary path for the API
+pub fn find_binary_path(api_dir: &Path) -> Result<std::path::PathBuf> {
+    let binary_name = get_binary_name(api_dir)?;
     
-    None
+    // Find workspace root to locate target/debug
+    let mut workspace_root = api_dir.to_path_buf();
+    while !workspace_root.join("target").exists() {
+        if !workspace_root.pop() {
+            anyhow::bail!("Could not find workspace root with target directory");
+        }
+    }
+
+    #[cfg(windows)]
+    let binary_path = workspace_root.join("target").join("debug").join(format!("{}.exe", binary_name));
+    #[cfg(not(windows))]
+    let binary_path = workspace_root.join("target").join("debug").join(&binary_name);
+
+    if !binary_path.exists() {
+        anyhow::bail!("Binary not found: {}", binary_path.display());
+    }
+
+    Ok(binary_path)
+}
+
+/// Export data from the built binary using an environment variable
+pub async fn export_from_binary(binary_path: &Path, env_var: &str) -> Result<String> {
+    debug!("Exporting {} from {}", env_var, binary_path.display());
+
+    let output = Command::new(binary_path)
+        .env(env_var, "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+        .context(format!("Failed to run binary for {} export", env_var))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    
+    // Find JSON array in output
+    let json_start = stdout.rfind("\n[").map(|i| i + 1)
+        .or_else(|| if stdout.starts_with('[') { Some(0) } else { None })
+        .unwrap_or(0);
+    
+    let json_str = &stdout[json_start..];
+    
+    Ok(json_str.trim().to_string())
 }
 
 pub async fn run(args: PrebuildArgs) -> Result<()> {
-    let project_dir = match args.project_dir {
-        Some(dir) => dir,
-        None => find_project_root()
-            .context("Could not find project root. Run from project directory or use --project-dir")?,
-    };
-    
+    let current_dir = std::env::current_dir()?;
     let output_dir = args.output_dir
-        .unwrap_or_else(|| project_dir.join(".yeollin").join("app"));
+        .unwrap_or_else(|| current_dir.join(".yeollin").join("app"));
+    let api_dir = current_dir.join("api");
 
     info!("Prebuild starting...");
-    info!("  Project: {}", project_dir.display());
-    info!("  Output:  {}", output_dir.display());
+    info!("  Current dir: {}", current_dir.display());
+    info!("  Output:      {}", output_dir.display());
 
-    // 1. Discover plugins with frontend assets
-    let plugins = discover_plugins(&project_dir)?;
-    info!("Found {} plugins with frontend assets", plugins.len());
-
-    run_with_plugins(&output_dir, &plugins, args.force).await
-}
-
-/// Run prebuild with an explicit list of plugins
-/// 
-/// If `copy_mode` is true, files are copied instead of symlinked (needed for production builds on Windows)
-pub async fn run_with_plugins(output_dir: &Path, plugins: &[PluginFrontend], force: bool) -> Result<()> {
-    run_with_plugins_mode(output_dir, plugins, &[], force, false).await
-}
-
-/// Run prebuild with explicit copy mode control
-/// 
-/// * `output_dir` - Where to write the generated app
-/// * `plugins` - Frontend plugins to link/copy
-/// * `all_plugins` - Full plugin info for plugins.json (from binary export)
-/// * `force` - Force overwrite existing output
-/// * `copy_mode` - Use copy instead of symlink (needed for production)
-pub async fn run_with_plugins_mode(
-    output_dir: &Path, 
-    plugins: &[PluginFrontend], 
-    all_plugins: &[PluginInfo],
-    force: bool, 
-    copy_mode: bool
-) -> Result<()> {
-    for plugin in plugins {
-        debug!("  - {} at {}", plugin.name, plugin.app_path.display());
+    // Detect app/ in current directory
+    let frontend = detect_current_app();
+    
+    if let Some(ref app) = frontend {
+        info!("Found frontend: {} at {}", app.name, app.app_path.display());
+    } else {
+        info!("No app/ directory found, creating template only");
     }
 
-    // 1. Extract or prepare app template
+    // Build API first if exists
+    if api_dir.is_dir() {
+        info!("Building API...");
+        let build_status = Command::new("cargo")
+            .current_dir(&api_dir)
+            .args(["build"])
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await?;
+
+        if !build_status.success() {
+            anyhow::bail!("Failed to build API");
+        }
+    }
+
+    // Export menus and plugins from binary
+    let (menus_json, plugins_json) = if api_dir.is_dir() {
+        let binary_path = find_binary_path(&api_dir)?;
+        
+        info!("Exporting menus from binary...");
+        let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {
+            Ok(m) => {
+                info!("Exported menus successfully");
+                Some(m)
+            }
+            Err(e) => {
+                debug!("Could not export menus: {}", e);
+                None
+            }
+        };
+
+        info!("Exporting plugins from binary...");
+        let plugins = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_PLUGINS").await {
+            Ok(p) => {
+                info!("Exported plugins successfully");
+                Some(p)
+            }
+            Err(e) => {
+                debug!("Could not export plugins: {}", e);
+                None
+            }
+        };
+
+        (menus, plugins)
+    } else {
+        (None, None)
+    };
+
+    run_prebuild(&output_dir, frontend.as_ref(), menus_json.as_deref(), plugins_json.as_deref(), args.force).await
+}
+
+/// Run prebuild with optional frontend, menus, and plugins
+pub async fn run_prebuild(
+    output_dir: &Path, 
+    frontend: Option<&AppFrontend>,
+    menus_json: Option<&str>,
+    plugins_json: Option<&str>,
+    force: bool,
+) -> Result<()> {
+    // 1. Prepare output directory
     prepare_output_dir(output_dir, force)?;
     
     // 2. Create .gitignore in .yeollin/ directory
@@ -150,77 +215,54 @@ pub async fn run_with_plugins_mode(
     AppTemplate::extract_to(output_dir)?;
     info!("Extracted app template to {}", output_dir.display());
 
-    // 4. Merge plugin dependencies into output package.json
-    merge_plugin_dependencies(output_dir, plugins)?;
-    info!("Merged plugin dependencies");
+    // 4. Copy openapi.json from api/ if it exists
+    let current_dir = std::env::current_dir()?;
+    copy_openapi_json(&current_dir, output_dir)?;
 
-    // 5. Link or copy plugin frontends
-    link_plugins(output_dir, plugins, copy_mode)?;
-    info!("Linked {} plugin frontends", plugins.len());
+    // 5. If frontend exists, merge dependencies and link
+    if let Some(app) = frontend {
+        merge_dependencies(output_dir, &current_dir)?;
+        info!("Merged dependencies");
 
-    // 6. Generate plugin manifest for Next.js
-    generate_plugin_manifest(output_dir, plugins)?;
-    info!("Generated plugin manifest");
+        link_frontend(output_dir, app, true)?;  // Always copy for now (Turbopack compatibility)
+        info!("Linked frontend");
+    }
 
-    // 7. Write full plugins.json for settings page (with all metadata)
-    write_plugins_json(output_dir, all_plugins)?;
-    info!("Generated plugins.json");
+    // 6. Write menus.json and plugins.json (from binary export or empty)
+    write_menus(output_dir, menus_json)?;
+    write_plugins(output_dir, plugins_json)?;
+
+    // 7. Copy plugin frontend files
+    copy_plugin_frontends(output_dir, plugins_json)?;
 
     info!("Prebuild complete!");
     Ok(())
 }
 
-/// Discover plugins that have frontend assets (app/ directory)
-/// 
-/// Skips directories that look like complete Next.js apps (have next.config.*)
-fn discover_plugins(project_dir: &Path) -> Result<Vec<PluginFrontend>> {
-    let plugins_dir = project_dir.join("plugins");
+/// Copy openapi.json from api/ directory to output if it exists
+fn copy_openapi_json(current_dir: &Path, output_dir: &Path) -> Result<()> {
+    let api_openapi = current_dir.join("api").join("openapi.json");
     
-    if !plugins_dir.exists() {
-        return Ok(vec![]);
+    if api_openapi.exists() {
+        let dest = output_dir.join("openapi.json");
+        fs::copy(&api_openapi, &dest)?;
+        info!("Copied openapi.json from api/");
+    } else {
+        // Create empty openapi.json placeholder so Next.js config doesn't fail
+        let placeholder = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {
+                "title": "API",
+                "version": "0.1.0"
+            },
+            "paths": {}
+        });
+        let dest = output_dir.join("openapi.json");
+        fs::write(&dest, serde_json::to_string_pretty(&placeholder)?)?;
+        debug!("Created placeholder openapi.json");
     }
-
-    let mut plugins = vec![];
-
-    for entry in fs::read_dir(&plugins_dir)
-        .with_context(|| format!("Failed to read plugins directory: {}", plugins_dir.display()))?
-    {
-        let entry = entry?;
-        let path = entry.path();
-        
-        if !path.is_dir() {
-            continue;
-        }
-
-        let plugin_name = path.file_name()
-            .and_then(|n| n.to_str())
-            .map(|s| s.to_string())
-            .unwrap_or_default();
-
-        let app_path = path.join("app");
-        
-        if app_path.exists() && app_path.is_dir() {
-            // Skip if this looks like a complete Next.js app (not just plugin components)
-            if is_complete_nextjs_app(&app_path) {
-                debug!("Skipping {} - appears to be a complete Next.js app", plugin_name);
-                continue;
-            }
-            
-            plugins.push(PluginFrontend {
-                name: plugin_name,
-                plugin_path: path,
-                app_path,
-            });
-        }
-    }
-
-    Ok(plugins)
-}
-
-/// Check if a directory is a complete Next.js app (has next.config.* file)
-fn is_complete_nextjs_app(path: &Path) -> bool {
-    let config_files = ["next.config.ts", "next.config.js", "next.config.mjs"];
-    config_files.iter().any(|f| path.join(f).exists())
+    
+    Ok(())
 }
 
 /// Prepare output directory
@@ -230,10 +272,10 @@ fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
             fs::remove_dir_all(output_dir)
                 .with_context(|| format!("Failed to remove existing output: {}", output_dir.display()))?;
         } else {
-            // Clean only the plugins symlink directory, keep rest
-            let plugins_link_dir = output_dir.join("src").join("app").join("(plugins)");
-            if plugins_link_dir.exists() {
-                fs::remove_dir_all(&plugins_link_dir)?;
+            // Clean only the app symlink directory, keep rest
+            let app_link_dir = output_dir.join("src").join("app").join("(app)");
+            if app_link_dir.exists() {
+                fs::remove_dir_all(&app_link_dir)?;
             }
         }
     }
@@ -244,293 +286,190 @@ fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
     Ok(())
 }
 
-/// Merge plugin dependencies into the output package.json
-fn merge_plugin_dependencies(output_dir: &Path, plugins: &[PluginFrontend]) -> Result<()> {
-    let package_json_path = output_dir.join("package.json");
+/// Merge dependencies from current directory's package.json into output
+fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
+    let output_package = output_dir.join("package.json");
+    let app_package = app_dir.join("package.json");
     
-    if !package_json_path.exists() {
+    if !output_package.exists() || !app_package.exists() {
         return Ok(());
     }
 
-    // Read base package.json
-    let content = fs::read_to_string(&package_json_path)?;
-    let mut package: serde_json::Value = serde_json::from_str(&content)?;
+    let output_content = fs::read_to_string(&output_package)?;
+    let mut output_json: serde_json::Value = serde_json::from_str(&output_content)?;
 
-    // Collect dependencies from plugins
-    for plugin in plugins {
-        let plugin_package_path = plugin.plugin_path.join("package.json");
-        
-        if !plugin_package_path.exists() {
-            continue;
+    let app_content = fs::read_to_string(&app_package)?;
+    let app_json: serde_json::Value = serde_json::from_str(&app_content)?;
+
+    // Merge dependencies
+    if let Some(deps) = app_json.get("dependencies").and_then(|d| d.as_object()) {
+        if let Some(target) = output_json.get_mut("dependencies").and_then(|d| d.as_object_mut()) {
+            for (key, value) in deps {
+                if !target.contains_key(key) {
+                    debug!("Adding dependency: {} = {}", key, value);
+                    target.insert(key.clone(), value.clone());
+                }
+            }
         }
+    }
 
-        let plugin_content = fs::read_to_string(&plugin_package_path)?;
-        let plugin_package: serde_json::Value = match serde_json::from_str(&plugin_content) {
-            Ok(v) => v,
-            Err(_) => continue,
+    // Merge devDependencies
+    if let Some(deps) = app_json.get("devDependencies").and_then(|d| d.as_object()) {
+        if let Some(target) = output_json.get_mut("devDependencies").and_then(|d| d.as_object_mut()) {
+            for (key, value) in deps {
+                if !target.contains_key(key) {
+                    debug!("Adding devDependency: {} = {}", key, value);
+                    target.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    }
+
+    let merged = serde_json::to_string_pretty(&output_json)?;
+    fs::write(&output_package, merged)?;
+
+    Ok(())
+}
+
+/// Link or copy frontend directory into the app
+fn link_frontend(output_dir: &Path, frontend: &AppFrontend, copy_mode: bool) -> Result<()> {
+    // Frontend goes under src/app/(app)/ for Next.js App Router
+    let app_dir = output_dir.join("src").join("app").join("(app)");
+    fs::create_dir_all(&app_dir)?;
+
+    let link_path = app_dir.join(&frontend.name);
+    
+    if copy_mode {
+        copy_dir_recursive(&frontend.app_path, &link_path)?;
+        debug!("Copied frontend to {}", link_path.display());
+    } else {
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&frontend.app_path, &link_path)?;
+        }
+        
+        #[cfg(windows)]
+        {
+            if std::os::windows::fs::symlink_dir(&frontend.app_path, &link_path).is_err() {
+                copy_dir_recursive(&frontend.app_path, &link_path)?;
+            }
+        }
+        debug!("Linked frontend to {}", link_path.display());
+    }
+
+    Ok(())
+}
+
+/// Write menus.json from exported menus or empty array
+/// Transforms MenuConfig[] to MenuItem[] for frontend consumption
+fn write_menus(output_dir: &Path, menus_json: Option<&str>) -> Result<()> {
+    let menus_path = output_dir.join("src").join("menus.json");
+    
+    let content = if let Some(json_str) = menus_json {
+        // Parse the MenuConfig[] from binary export
+        let menu_configs: Vec<serde_json::Value> = serde_json::from_str(json_str)
+            .unwrap_or_default();
+        
+        // Flatten: extract all items from each MenuConfig
+        let menu_items: Vec<serde_json::Value> = menu_configs
+            .into_iter()
+            .filter_map(|config| config.get("items").cloned())
+            .filter_map(|items| items.as_array().cloned())
+            .flatten()
+            .collect();
+        
+        serde_json::to_string_pretty(&menu_items)
+            .unwrap_or_else(|_| "[]".to_string())
+    } else {
+        "[]".to_string()
+    };
+    
+    fs::write(&menus_path, content)?;
+    info!("Wrote menus.json");
+    Ok(())
+}
+
+/// Write plugins.json from exported plugins or empty array
+fn write_plugins(output_dir: &Path, plugins_json: Option<&str>) -> Result<()> {
+    let plugins_path = output_dir.join("src").join("plugins.json");
+    let content = plugins_json.unwrap_or("[]");
+    fs::write(&plugins_path, content)?;
+    info!("Wrote plugins.json");
+    Ok(())
+}
+
+/// Copy plugin frontend files into the output directory
+/// Parses plugins_json to get frontend_path and copies route groups
+fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Result<()> {
+    let Some(json_str) = plugins_json else {
+        return Ok(());
+    };
+
+    let plugins: Vec<serde_json::Value> = serde_json::from_str(json_str)
+        .unwrap_or_default();
+
+    for plugin in plugins {
+        let Some(name) = plugin.get("name").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(frontend_path) = plugin.get("frontend_path").and_then(|v| v.as_str()) else {
+            continue;
         };
 
-        // Merge dependencies
-        if let Some(deps) = plugin_package.get("dependencies").and_then(|d| d.as_object()) {
-            let target_deps = package
-                .get_mut("dependencies")
-                .and_then(|d| d.as_object_mut());
-            
-            if let Some(target) = target_deps {
-                for (key, value) in deps {
-                    if !target.contains_key(key) {
-                        debug!("Adding dependency from {}: {} = {}", plugin.name, key, value);
-                        target.insert(key.clone(), value.clone());
-                    }
-                }
-            }
-        }
-
-        // Merge devDependencies
-        if let Some(deps) = plugin_package.get("devDependencies").and_then(|d| d.as_object()) {
-            let target_deps = package
-                .get_mut("devDependencies")
-                .and_then(|d| d.as_object_mut());
-            
-            if let Some(target) = target_deps {
-                for (key, value) in deps {
-                    if !target.contains_key(key) {
-                        debug!("Adding devDependency from {}: {} = {}", plugin.name, key, value);
-                        target.insert(key.clone(), value.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    // Write merged package.json
-    let merged = serde_json::to_string_pretty(&package)?;
-    fs::write(&package_json_path, merged)?;
-
-    Ok(())
-}
-
-/// Link or copy plugin frontend directories into the app
-/// 
-/// If `copy_mode` is true, always copies files (needed for production builds)
-fn link_plugins(output_dir: &Path, plugins: &[PluginFrontend], copy_mode: bool) -> Result<()> {
-    // Plugins go under src/app/(plugins)/ for Next.js App Router
-    let plugins_app_dir = output_dir.join("src").join("app").join("(plugins)");
-    fs::create_dir_all(&plugins_app_dir)?;
-
-    for plugin in plugins {
-        let link_path = plugins_app_dir.join(&plugin.name);
-        
-        if copy_mode {
-            // Production: always copy
-            copy_dir_recursive(&plugin.app_path, &link_path)?;
-            debug!("Copied plugin '{}' to {}", plugin.name, link_path.display());
-        } else {
-            // Development: try symlink
-            #[cfg(unix)]
-            {
-                std::os::unix::fs::symlink(&plugin.app_path, &link_path)
-                    .with_context(|| format!("Failed to symlink plugin: {}", plugin.name))?;
-            }
-            
-            #[cfg(windows)]
-            {
-                // Try symlink first, fall back to junction
-                if std::os::windows::fs::symlink_dir(&plugin.app_path, &link_path).is_err() {
-                    // Use junction as fallback (doesn't require admin)
-                    let status = std::process::Command::new("cmd")
-                        .args(["/C", "mklink", "/J", 
-                            &link_path.to_string_lossy(), 
-                            &plugin.app_path.to_string_lossy()])
-                        .status();
-                    
-                    if status.is_err() || !status.unwrap().success() {
-                        // Last resort: copy
-                        copy_dir_recursive(&plugin.app_path, &link_path)?;
-                    }
-                }
-            }
-            debug!("Linked plugin '{}' to {}", plugin.name, link_path.display());
-        }
-    }
-
-    Ok(())
-}
-
-/// Generate menus.json by scanning plugin directories for page.tsx files
-fn generate_plugin_manifest(output_dir: &Path, plugins: &[PluginFrontend]) -> Result<()> {
-    use serde::Serialize;
-
-    let mut menu_items: Vec<serde_json::Value> = vec![];
-
-    for plugin in plugins {
-        // Scan plugin's app directory for page.tsx files
-        let routes = scan_routes(&plugin.name, &plugin.app_path)?;
-        
-        if routes.is_empty() {
+        let frontend_dir = Path::new(frontend_path);
+        if !frontend_dir.exists() || !frontend_dir.is_dir() {
+            debug!("Plugin {} frontend path not found: {}", name, frontend_path);
             continue;
         }
 
-        // Build menu tree from routes
-        let plugin_menu = build_menu_tree(&plugin.name, routes);
-        menu_items.extend(plugin_menu);
-    }
-
-    // Write menus.json
-    let menus_path = output_dir.join("src").join("menus.json");
-    let json = serde_json::to_string_pretty(&menu_items)?;
-    fs::write(&menus_path, json)?;
-
-    // Also write plugins.json for backward compatibility
-    #[derive(Serialize)]
-    struct PluginManifest {
-        plugins: Vec<PluginEntry>,
-    }
-    #[derive(Serialize)]
-    struct PluginEntry {
-        name: String,
-        route_prefix: String,
-    }
-    let manifest = PluginManifest {
-        plugins: plugins.iter().map(|p| PluginEntry {
-            name: p.name.clone(),
-            route_prefix: format!("/(plugins)/{}", p.name),
-        }).collect(),
-    };
-    let manifest_path = output_dir.join("plugins.json");
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
-
-    Ok(())
-}
-
-/// Scan a directory recursively for page.tsx files and return route paths
-fn scan_routes(plugin_name: &str, app_dir: &Path) -> Result<Vec<String>> {
-    let mut routes = vec![];
-    scan_routes_recursive(plugin_name, app_dir, app_dir, &mut routes)?;
-    routes.sort();
-    Ok(routes)
-}
-
-fn scan_routes_recursive(plugin_name: &str, base: &Path, current: &Path, routes: &mut Vec<String>) -> Result<()> {
-    if !current.is_dir() {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(current)? {
-        let entry = entry?;
-        let path = entry.path();
+        // Destination: .yeollin/app/src/app/(app)/<plugin-name>/
+        let dest_base = output_dir.join("src").join("app").join("(app)").join(name);
         
-        if path.is_dir() {
-            scan_routes_recursive(plugin_name, base, &path, routes)?;
-        } else if path.file_name().map(|n| n == "page.tsx").unwrap_or(false) {
-            // Convert file path to URL route
-            let relative = path.parent().unwrap().strip_prefix(base).unwrap_or(Path::new(""));
-            let route = path_to_route(plugin_name, relative);
-            routes.push(route);
+        // Scan for route groups (folders starting with parentheses) and copy their contents
+        for entry in fs::read_dir(frontend_dir)? {
+            let entry = entry?;
+            let entry_path = entry.path();
+            
+            if !entry_path.is_dir() {
+                continue;
+            }
+
+            let dir_name = entry.file_name();
+            let dir_name_str = dir_name.to_str().unwrap_or("");
+
+            // Check if it's a route group like (example)
+            if dir_name_str.starts_with('(') && dir_name_str.ends_with(')') {
+                // Copy contents of route group to plugin destination
+                // e.g., (example)/items/* -> <plugin-name>/items/*
+                copy_route_group_contents(&entry_path, &dest_base)?;
+                info!("Copied plugin frontend: {} from {}", name, dir_name_str);
+            }
         }
     }
 
     Ok(())
 }
 
-/// Convert filesystem path to URL route
-/// Adds plugin name prefix and removes route groups (parentheses)
-fn path_to_route(plugin_name: &str, path: &Path) -> String {
-    let parts: Vec<&str> = path
-        .components()
-        .filter_map(|c| {
-            if let std::path::Component::Normal(s) = c {
-                let s = s.to_str()?;
-                // Skip route groups (directories in parentheses)
-                if s.starts_with('(') && s.ends_with(')') {
-                    None
-                } else {
-                    Some(s)
-                }
-            } else {
-                None
-            }
-        })
-        .collect();
+/// Copy contents of a route group directory to destination
+/// Handles nested folders and files
+fn copy_route_group_contents(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
 
-    if parts.is_empty() {
-        // Root of plugin
-        format!("/{}", plugin_name)
-    } else {
-        format!("/{}/{}", plugin_name, parts.join("/"))
-    }
-}
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
 
-/// Build a menu tree from a list of routes
-fn build_menu_tree(plugin_name: &str, routes: Vec<String>) -> Vec<serde_json::Value> {
-    use serde_json::json;
-
-    // Find root route and child routes
-    let root_route = routes.iter().find(|r| {
-        let parts: Vec<&str> = r.trim_start_matches('/').split('/').filter(|s| !s.is_empty()).collect();
-        parts.len() <= 1
-    });
-
-    let children: Vec<serde_json::Value> = routes.iter()
-        .filter(|r| {
-            let parts: Vec<&str> = r.trim_start_matches('/').split('/').filter(|s| !s.is_empty()).collect();
-            parts.len() > 1
-        })
-        .map(|r| {
-            let parts: Vec<&str> = r.trim_start_matches('/').split('/').filter(|s| !s.is_empty()).collect();
-            let label = parts.last().unwrap_or(&"");
-            json!({
-                "id": format!("{}-{}", plugin_name, parts.join("-")),
-                "label": capitalize(label),
-                "path": r,
-                "children": []
-            })
-        })
-        .collect();
-
-    if let Some(root) = root_route {
-        vec![json!({
-            "id": plugin_name,
-            "label": capitalize(&plugin_name.replace('-', " ")),
-            "path": root,
-            "children": children
-        })]
-    } else if !children.is_empty() {
-        // No root page, just children
-        children
-    } else {
-        vec![]
-    }
-}
-
-/// Capitalize first letter of each word
-fn capitalize(s: &str) -> String {
-    s.split(|c| c == '-' || c == '_' || c == ' ')
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Write full plugins.json for settings page (with all metadata from binary export)
-fn write_plugins_json(output_dir: &Path, all_plugins: &[PluginInfo]) -> Result<()> {
-    if all_plugins.is_empty() {
-        return Ok(());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
     }
 
-    let plugins_json_path = output_dir.join("src").join("plugins.json");
-    let json = serde_json::to_string_pretty(&all_plugins)?;
-    fs::write(&plugins_json_path, json)?;
-    
     Ok(())
 }
 
-/// Recursively copy a directory
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
     

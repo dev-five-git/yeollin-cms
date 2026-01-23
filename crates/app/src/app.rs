@@ -50,11 +50,17 @@ pub struct YeollinApp {
 impl YeollinApp {
     /// Run the CMS server
     /// 
+    /// If YEOLLIN_EXPORT_MENUS env var is set, exports menus as JSON and exits
     /// If YEOLLIN_EXPORT_PLUGINS env var is set, exports plugin info as JSON and exits
     pub async fn run(self) -> anyhow::Result<()> {
-        // Check for export mode - output ONLY JSON, nothing else
+        // Check for menus export mode
+        if std::env::var("YEOLLIN_EXPORT_MENUS").is_ok() {
+            println!("{}", self.export_menus_json());
+            return Ok(());
+        }
+
+        // Check for plugins export mode
         if std::env::var("YEOLLIN_EXPORT_PLUGINS").is_ok() {
-            // Use eprintln for any debug info, println only for JSON
             println!("{}", self.export_plugins_json());
             return Ok(());
         }
@@ -87,6 +93,7 @@ impl YeollinApp {
 /// Builder for Yeollin CMS Application
 pub struct YeollinAppBuilder {
     plugins: Vec<PluginMetadata>,
+    routers: Vec<Router>,
     host: String,
     port: u16,
     static_dir: Option<&'static Dir<'static>>,
@@ -97,6 +104,7 @@ impl YeollinAppBuilder {
     pub(crate) fn new() -> Self {
         Self {
             plugins: vec![],
+            routers: vec![],
             host: "0.0.0.0".to_string(),
             port: 3001,
             static_dir: None,
@@ -112,6 +120,27 @@ impl YeollinAppBuilder {
             "Registering plugin"
         );
         self.plugins.push(metadata);
+        self
+    }
+
+    /// Merge an external router (e.g., vespera-generated routes)
+    /// 
+    /// # Example
+    /// 
+    /// ```rust,ignore
+    /// let vespera_router = vespera::vespera!(
+    ///     openapi = "openapi.json",
+    ///     title = "My API",
+    ///     version = "1.0.0",
+    ///     docs_url = "/docs"
+    /// );
+    /// 
+    /// let app = yeollin::app()
+    ///     .merge(vespera_router)
+    ///     .build();
+    /// ```
+    pub fn merge(mut self, router: Router) -> Self {
+        self.routers.push(router);
         self
     }
 
@@ -166,10 +195,24 @@ impl YeollinAppBuilder {
     }
 
     /// Build the application
-    pub fn build(self) -> YeollinApp {
+    pub fn build(mut self) -> YeollinApp {
+        // Auto-detect dev proxy from environment
+        if self.dev_proxy_port.is_none() {
+            if let Ok(dev_proxy_port) = std::env::var("YEOLLIN_DEV_PROXY") {
+                if let Ok(port) = dev_proxy_port.parse::<u16>() {
+                    self.dev_proxy_port = Some(port);
+                }
+            }
+        }
+
         let mut router = Router::new();
         let mut menus = vec![];
         let mut plugins = vec![];
+
+        // Merge external routers (e.g., vespera)
+        for external_router in self.routers {
+            router = router.merge(external_router);
+        }
 
         // Merge all plugin routers
         for plugin in self.plugins {

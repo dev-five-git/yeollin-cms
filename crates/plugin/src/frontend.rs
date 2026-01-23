@@ -2,6 +2,8 @@
 
 use include_dir::{Dir, DirEntry};
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use yeollin_core::{MenuConfig, MenuItem};
 
 /// Frontend assets embedded in a plugin
@@ -32,6 +34,17 @@ impl FrontendAssets {
             dir: None,
             menu: None,
             plugin_name: None,
+        }
+    }
+
+    /// Create frontend assets from a filesystem path (scans at runtime)
+    /// This is used by the yeollin_plugin! macro to generate menus from the app/ directory
+    pub fn from_path(plugin_name: &str, path: &str) -> Self {
+        let (menu, _) = Self::parse_app_router_from_path(plugin_name, path);
+        Self {
+            dir: None,
+            menu,
+            plugin_name: Some(plugin_name.to_string()),
         }
     }
 
@@ -110,6 +123,8 @@ impl FrontendAssets {
 
         // Scan for route groups (folders starting with parentheses)
         let mut children = vec![];
+        let name = plugin_name.clone().unwrap_or_else(|| "plugin".to_string());
+        let base_path = format!("/{}", name);
 
         for entry in dir.entries() {
             if let DirEntry::Dir(subdir) = entry {
@@ -122,15 +137,13 @@ impl FrontendAssets {
                 // Check if it's a route group like (example)
                 if dir_name.starts_with('(') && dir_name.ends_with(')') {
                     // Scan children of the route group
-                    children.extend(Self::scan_routes(subdir, ""));
+                    children.extend(Self::scan_routes(subdir, &base_path));
                 }
             }
         }
 
         // Sort children by order
         children.sort_by_key(|item| item.order);
-
-        let name = plugin_name.clone().unwrap_or_else(|| "plugin".to_string());
 
         // Build root menu item
         let root_item = MenuItem {
@@ -234,8 +247,11 @@ impl FrontendAssets {
     ) -> Option<HashMap<String, serde_json::Value>> {
         let route_file = dir.get_file("route.ts")?;
         let content = route_file.contents_utf8()?;
+        Self::parse_route_config_str(content)
+    }
 
-        // Simple parsing - extract key: "value" or key: number patterns
+    /// Parse route.ts content string to extract config
+    fn parse_route_config_str(content: &str) -> Option<HashMap<String, serde_json::Value>> {
         let mut config = HashMap::new();
 
         // Match: name: "value" or label: "value" etc
@@ -275,5 +291,160 @@ impl FrontendAssets {
         } else {
             Some(config)
         }
+    }
+
+    /// Parse App Router folder structure from filesystem path to generate menu
+    fn parse_app_router_from_path(
+        plugin_name: &str,
+        path: &str,
+    ) -> (Option<MenuConfig>, Option<String>) {
+        let dir_path = Path::new(path);
+        if !dir_path.exists() || !dir_path.is_dir() {
+            return (None, None);
+        }
+
+        // Try to get plugin config from root route.ts
+        let plugin_config = Self::parse_route_config_from_file(&dir_path.join("route.ts"));
+
+        let plugin_label = plugin_config
+            .as_ref()
+            .and_then(|c| c.get("label"))
+            .and_then(|v| v.as_str())
+            .unwrap_or(plugin_name);
+
+        let plugin_icon = plugin_config
+            .as_ref()
+            .and_then(|c| c.get("icon"))
+            .and_then(|v| v.as_str());
+
+        let plugin_order = plugin_config
+            .as_ref()
+            .and_then(|c| c.get("order"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(100) as i32;
+
+        // Scan for route groups (folders starting with parentheses)
+        let mut children = vec![];
+        let base_path = format!("/{}", plugin_name);
+
+        if let Ok(entries) = fs::read_dir(dir_path) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let entry_path = entry.path();
+                if !entry_path.is_dir() {
+                    continue;
+                }
+
+                let dir_name = entry_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+
+                // Check if it's a route group like (example)
+                if dir_name.starts_with('(') && dir_name.ends_with(')') {
+                    children.extend(Self::scan_routes_from_path(&entry_path, &base_path));
+                }
+            }
+        }
+
+        // Sort children by order
+        children.sort_by_key(|item| item.order);
+
+        // Build root menu item
+        let root_item = MenuItem {
+            id: plugin_name.to_string(),
+            label: plugin_label.to_string(),
+            icon: plugin_icon.map(|s| s.to_string()),
+            path: format!("/{}", plugin_name),
+            order: plugin_order,
+            children,
+        };
+
+        let menu = MenuConfig {
+            plugin: plugin_name.to_string(),
+            items: vec![root_item],
+        };
+
+        (Some(menu), Some(plugin_name.to_string()))
+    }
+
+    /// Recursively scan routes from filesystem
+    fn scan_routes_from_path(dir_path: &Path, base_path: &str) -> Vec<MenuItem> {
+        let mut items = vec![];
+
+        let Ok(entries) = fs::read_dir(dir_path) else {
+            return items;
+        };
+
+        for entry in entries.filter_map(|e| e.ok()) {
+            let entry_path = entry.path();
+            if !entry_path.is_dir() {
+                continue;
+            }
+
+            let dir_name = entry_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+
+            // Skip hidden folders and route groups
+            if dir_name.starts_with('.') || dir_name.starts_with('_') || dir_name.starts_with('(') {
+                continue;
+            }
+
+            // Check if this folder has a page.tsx (is a valid route)
+            if !entry_path.join("page.tsx").exists() {
+                continue;
+            }
+
+            // Try to get route config
+            let route_config = Self::parse_route_config_from_file(&entry_path.join("route.ts"));
+
+            let label = route_config
+                .as_ref()
+                .and_then(|c| c.get("label"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(dir_name);
+
+            let icon = route_config
+                .as_ref()
+                .and_then(|c| c.get("icon"))
+                .and_then(|v| v.as_str());
+
+            let order = route_config
+                .as_ref()
+                .and_then(|c| c.get("order"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(50) as i32;
+
+            let hidden = route_config
+                .as_ref()
+                .and_then(|c| c.get("hidden"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            if hidden {
+                continue;
+            }
+
+            let path = format!("{}/{}", base_path, dir_name);
+            let children = Self::scan_routes_from_path(&entry_path, &path);
+
+            items.push(MenuItem {
+                id: dir_name.to_string(),
+                label: label.to_string(),
+                icon: icon.map(|s| s.to_string()),
+                path,
+                order,
+                children,
+            });
+        }
+
+        items
+    }
+
+    /// Parse route.ts file from filesystem
+    fn parse_route_config_from_file(path: &Path) -> Option<HashMap<String, serde_json::Value>> {
+        let content = fs::read_to_string(path).ok()?;
+        Self::parse_route_config_str(&content)
     }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@yeollin-plugin/example-app",
+  "name": "example-app",
   "version": "0.1.0",
   "private": true,
   "scripts": {
