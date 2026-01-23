@@ -3,10 +3,12 @@
 //! Extracts the app template and links frontend assets from current directory.
 
 use anyhow::{Context, Result};
+use async_walkdir::{DirEntry, WalkDir};
 use clap::Args;
-use std::fs;
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, info};
 
@@ -69,10 +71,10 @@ pub fn detect_crate_dir() -> Option<PathBuf> {
 }
 
 /// Get binary name from Cargo.toml
-pub fn get_binary_name(crate_dir: &Path) -> Result<String> {
+pub async fn get_binary_name(crate_dir: &Path) -> Result<String> {
     let cargo_toml = crate_dir.join("Cargo.toml");
     if cargo_toml.exists() {
-        let content = fs::read_to_string(&cargo_toml)?;
+        let content = fs::read_to_string(&cargo_toml).await?;
         // Look for [[bin]] name first
         if let Some(bin_name) = content
             .lines()
@@ -95,8 +97,8 @@ pub fn get_binary_name(crate_dir: &Path) -> Result<String> {
 }
 
 /// Find binary path for the crate
-pub fn find_binary_path(crate_dir: &Path) -> Result<std::path::PathBuf> {
-    let binary_name = get_binary_name(crate_dir)?;
+pub async fn find_binary_path(crate_dir: &Path) -> Result<std::path::PathBuf> {
+    let binary_name = get_binary_name(crate_dir).await?;
 
     // Find workspace root to locate target/debug
     let mut workspace_root = crate_dir.to_path_buf();
@@ -197,12 +199,19 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
         }
     }
 
-    // Export menus and plugins from binary
+    // Export menus and plugins from binary IN PARALLEL
     let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
-        let binary_path = find_binary_path(crate_path)?;
+        let binary_path = find_binary_path(crate_path).await?;
 
-        info!("Exporting menus from binary...");
-        let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {
+        info!("Exporting menus and plugins from binary (parallel)...");
+
+        // Run both exports in parallel
+        let (menus_result, plugins_result) = tokio::join!(
+            export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS"),
+            export_from_binary(&binary_path, "YEOLLIN_EXPORT_PLUGINS")
+        );
+
+        let menus = match menus_result {
             Ok(m) => {
                 info!("Exported menus successfully");
                 Some(m)
@@ -213,8 +222,7 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
             }
         };
 
-        info!("Exporting plugins from binary...");
-        let plugins = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_PLUGINS").await {
+        let plugins = match plugins_result {
             Ok(p) => {
                 info!("Exported plugins successfully");
                 Some(p)
@@ -249,37 +257,46 @@ pub async fn run_prebuild(
     force: bool,
 ) -> Result<()> {
     // 1. Prepare output directory
-    prepare_output_dir(output_dir, force)?;
+    prepare_output_dir(output_dir, force).await?;
 
     // 2. Create .gitignore in .yeollin/ directory
     if let Some(yeollin_dir) = output_dir.parent() {
         let gitignore_path = yeollin_dir.join(".gitignore");
-        fs::write(&gitignore_path, "*\n")?;
+        fs::write(&gitignore_path, "*\n").await?;
     }
 
     // 3. Extract embedded template
-    AppTemplate::extract_to(output_dir)?;
+    AppTemplate::extract_to(output_dir).await?;
     info!("Extracted app template to {}", output_dir.display());
 
     // 4. Copy openapi.json from api/ if it exists
     let current_dir = std::env::current_dir()?;
-    copy_openapi_json(&current_dir, output_dir)?;
+    copy_openapi_json(&current_dir, output_dir).await?;
 
     // 5. If frontend exists, merge dependencies and link
     if let Some(app) = frontend {
-        merge_dependencies(output_dir, &current_dir)?;
+        merge_dependencies(output_dir, &current_dir).await?;
         info!("Merged dependencies");
 
-        link_frontend(output_dir, app, true)?; // Always copy for now (Turbopack compatibility)
+        link_frontend(output_dir, app, true).await?; // Always copy for now (Turbopack compatibility)
         info!("Linked frontend");
     }
 
-    // 6. Write menus.json and plugins.json (from binary export or empty)
-    write_menus(output_dir, menus_json)?;
-    write_plugins(output_dir, plugins_json)?;
+    // 6. Write menus.json and plugins.json IN PARALLEL
+    let menus_json_owned = menus_json.map(|s| s.to_string());
+    let plugins_json_owned = plugins_json.map(|s| s.to_string());
+    let output_dir_owned = output_dir.to_path_buf();
+    let output_dir_owned2 = output_dir.to_path_buf();
+
+    let (menus_result, plugins_result) = tokio::join!(
+        write_menus(&output_dir_owned, menus_json_owned.as_deref()),
+        write_plugins(&output_dir_owned2, plugins_json_owned.as_deref())
+    );
+    menus_result?;
+    plugins_result?;
 
     // 7. Copy plugin frontend files (goes under (auth)/)
-    let has_plugins = copy_plugin_frontends(output_dir, plugins_json)?;
+    let has_plugins = copy_plugin_frontends(output_dir, plugins_json).await?;
 
     // 8. Ensure (auth)/layout.tsx exists if plugins were copied
     // Template should already have it, but generate if missing
@@ -287,7 +304,7 @@ pub async fn run_prebuild(
         let auth_dir = output_dir.join("src").join("app").join("(auth)");
         let auth_layout = auth_dir.join("layout.tsx");
         if !auth_layout.exists() {
-            generate_auth_layout(&auth_dir)?;
+            generate_auth_layout(&auth_dir).await?;
             info!("Generated (auth)/layout.tsx for plugins");
         }
     }
@@ -297,12 +314,12 @@ pub async fn run_prebuild(
 }
 
 /// Copy openapi.json from api/ directory to output if it exists
-fn copy_openapi_json(current_dir: &Path, output_dir: &Path) -> Result<()> {
+async fn copy_openapi_json(current_dir: &Path, output_dir: &Path) -> Result<()> {
     let api_openapi = current_dir.join("api").join("openapi.json");
 
     if api_openapi.exists() {
         let dest = output_dir.join("openapi.json");
-        fs::copy(&api_openapi, &dest)?;
+        fs::copy(&api_openapi, &dest).await?;
         info!("Copied openapi.json from api/");
     } else {
         // Create empty openapi.json placeholder so Next.js config doesn't fail
@@ -315,7 +332,7 @@ fn copy_openapi_json(current_dir: &Path, output_dir: &Path) -> Result<()> {
             "paths": {}
         });
         let dest = output_dir.join("openapi.json");
-        fs::write(&dest, serde_json::to_string_pretty(&placeholder)?)?;
+        fs::write(&dest, serde_json::to_string_pretty(&placeholder)?).await?;
         debug!("Created placeholder openapi.json");
     }
 
@@ -323,25 +340,32 @@ fn copy_openapi_json(current_dir: &Path, output_dir: &Path) -> Result<()> {
 }
 
 /// Prepare output directory
-fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
+async fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
     if output_dir.exists() {
         if force {
-            fs::remove_dir_all(output_dir).with_context(|| {
+            fs::remove_dir_all(output_dir).await.with_context(|| {
                 format!("Failed to remove existing output: {}", output_dir.display())
             })?;
         } else {
-            // Clean route group directories, keep rest
+            // Clean route group directories IN PARALLEL
             let app_base = output_dir.join("src").join("app");
-            for dir_name in ["(public)", "(auth)", "(app)"] {
-                let dir = app_base.join(dir_name);
-                if dir.exists() {
-                    fs::remove_dir_all(&dir)?;
-                }
+            let dirs_to_remove: Vec<_> = ["(public)", "(auth)", "(app)"]
+                .iter()
+                .map(|name| app_base.join(name))
+                .filter(|dir| dir.exists())
+                .collect();
+
+            let mut futures = FuturesUnordered::new();
+            for dir in dirs_to_remove {
+                futures.push(async move { fs::remove_dir_all(&dir).await });
+            }
+            while let Some(result) = futures.next().await {
+                result?;
             }
         }
     }
 
-    fs::create_dir_all(output_dir).with_context(|| {
+    fs::create_dir_all(output_dir).await.with_context(|| {
         format!(
             "Failed to create output directory: {}",
             output_dir.display()
@@ -353,7 +377,7 @@ fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
 
 /// Merge dependencies from current directory's package.json into output
 /// Avoids duplicates by checking both dependencies AND devDependencies
-fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
+async fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
     let output_package = output_dir.join("package.json");
     let app_package = app_dir.join("package.json");
 
@@ -361,10 +385,15 @@ fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let output_content = fs::read_to_string(&output_package)?;
-    let mut output_json: serde_json::Value = serde_json::from_str(&output_content)?;
+    // Read both files IN PARALLEL
+    let (output_content, app_content) = tokio::join!(
+        fs::read_to_string(&output_package),
+        fs::read_to_string(&app_package)
+    );
+    let output_content = output_content?;
+    let app_content = app_content?;
 
-    let app_content = fs::read_to_string(&app_package)?;
+    let mut output_json: serde_json::Value = serde_json::from_str(&output_content)?;
     let app_json: serde_json::Value = serde_json::from_str(&app_content)?;
 
     // Collect all existing package names from both sections to avoid duplicates
@@ -411,47 +440,40 @@ fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
     }
 
     let merged = serde_json::to_string_pretty(&output_json)?;
-    fs::write(&output_package, merged)?;
+    fs::write(&output_package, merged).await?;
 
     Ok(())
 }
 
 /// Link or copy frontend directory into the app
 /// Separates routes into (public)/ and (auth)/ based on (public) marker in source path
-/// - Routes with (public) anywhere in path → src/app/(public)/...
-/// - Routes without (public) → src/app/(auth)/...
-fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bool) -> Result<()> {
-    use walkdir::WalkDir;
-
+/// Uses parallel file copying for better performance
+async fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bool) -> Result<()> {
     let public_dir = output_dir.join("src").join("app").join("(public)");
     let auth_dir = output_dir.join("src").join("app").join("(auth)");
 
     let mut has_public_routes = false;
     let mut has_auth_routes = false;
 
-    // Walk all files in frontend directory
-    for entry in WalkDir::new(&frontend.app_path) {
-        let entry = entry?;
+    // Collect all files to copy first
+    let mut files_to_copy: Vec<(PathBuf, PathBuf, bool)> = Vec::new();
+
+    let mut walker = WalkDir::new(&frontend.app_path);
+    while let Some(entry) = walker.next().await {
+        let entry: DirEntry = entry?;
         let src_path = entry.path();
 
-        // Skip directories, we only care about files
         if src_path.is_dir() {
             continue;
         }
 
-        // Get relative path from app_path
         let rel_path = src_path
             .strip_prefix(&frontend.app_path)
-            .unwrap_or(src_path);
+            .unwrap_or(&src_path);
         let rel_str = rel_path.to_string_lossy();
-
-        // Check if (public) appears anywhere in the path
         let is_public = rel_str.contains("(public)");
-
-        // Build clean path by stripping all route groups like (xxx)
         let clean_path = strip_route_groups(rel_path);
 
-        // Determine destination
         let dest_path = if is_public {
             has_public_routes = true;
             public_dir.join(&clean_path)
@@ -460,31 +482,62 @@ fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bool) ->
             auth_dir.join(&clean_path)
         };
 
-        // Create parent directories and copy file
-        if let Some(parent) = dest_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(src_path, &dest_path)?;
-        debug!(
-            "Copied {} -> {} ({})",
-            rel_str,
-            dest_path.display(),
-            if is_public { "public" } else { "auth" }
-        );
+        files_to_copy.push((src_path.to_path_buf(), dest_path, is_public));
     }
 
-    // Generate layout files only if they don't already exist (template may have them)
+    // Create all parent directories first (sequential to avoid race conditions)
+    let mut dirs_to_create: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    for (_, dest_path, _) in &files_to_copy {
+        if let Some(parent) = dest_path.parent() {
+            dirs_to_create.insert(parent.to_path_buf());
+        }
+    }
+    for dir in dirs_to_create {
+        fs::create_dir_all(&dir).await?;
+    }
+
+    // Copy files IN PARALLEL (batch of concurrent copies)
+    const PARALLEL_COPIES: usize = 32;
+    let mut futures = FuturesUnordered::new();
+
+    for (src_path, dest_path, is_public) in files_to_copy {
+        let future = async move {
+            fs::copy(&src_path, &dest_path).await?;
+            debug!(
+                "Copied {} -> {} ({})",
+                src_path.display(),
+                dest_path.display(),
+                if is_public { "public" } else { "auth" }
+            );
+            Ok::<_, anyhow::Error>(())
+        };
+        futures.push(future);
+
+        // Process in batches to avoid overwhelming the system
+        if futures.len() >= PARALLEL_COPIES {
+            if let Some(result) = futures.next().await {
+                result?;
+            }
+        }
+    }
+
+    // Drain remaining futures
+    while let Some(result) = futures.next().await {
+        result?;
+    }
+
+    // Generate layout files only if they don't already exist
     if has_public_routes {
         let public_layout = public_dir.join("layout.tsx");
         if !public_layout.exists() {
-            generate_public_layout(&public_dir)?;
+            generate_public_layout(&public_dir).await?;
             info!("Generated (public)/layout.tsx");
         }
     }
     if has_auth_routes {
         let auth_layout = auth_dir.join("layout.tsx");
         if !auth_layout.exists() {
-            generate_auth_layout(&auth_dir)?;
+            generate_auth_layout(&auth_dir).await?;
             info!("Generated (auth)/layout.tsx");
         }
     }
@@ -493,13 +546,11 @@ fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bool) ->
 }
 
 /// Strip all route groups (parenthesized segments) from a path
-/// e.g., "aa/bb/(public)/cc/page.tsx" -> "aa/bb/cc/page.tsx"
 fn strip_route_groups(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();
     for component in path.components() {
         if let std::path::Component::Normal(name) = component {
             let name_str = name.to_string_lossy();
-            // Skip route groups like (public), (dashboard), etc.
             if !(name_str.starts_with('(') && name_str.ends_with(')')) {
                 result.push(name);
             }
@@ -509,7 +560,7 @@ fn strip_route_groups(path: &Path) -> PathBuf {
 }
 
 /// Generate a minimal layout for public routes (no auth required)
-fn generate_public_layout(public_dir: &Path) -> Result<()> {
+async fn generate_public_layout(public_dir: &Path) -> Result<()> {
     let layout_path = public_dir.join("layout.tsx");
     let content = r#"export default function PublicLayout({
   children,
@@ -519,13 +570,13 @@ fn generate_public_layout(public_dir: &Path) -> Result<()> {
   return <>{children}</>;
 }
 "#;
-    fs::create_dir_all(public_dir)?;
-    fs::write(&layout_path, content)?;
+    fs::create_dir_all(public_dir).await?;
+    fs::write(&layout_path, content).await?;
     Ok(())
 }
 
 /// Generate a minimal layout for authenticated routes
-fn generate_auth_layout(auth_dir: &Path) -> Result<()> {
+async fn generate_auth_layout(auth_dir: &Path) -> Result<()> {
     let layout_path = auth_dir.join("layout.tsx");
     let content = r#"export default function AuthLayout({
   children,
@@ -536,22 +587,19 @@ fn generate_auth_layout(auth_dir: &Path) -> Result<()> {
   return <>{children}</>;
 }
 "#;
-    fs::create_dir_all(auth_dir)?;
-    fs::write(&layout_path, content)?;
+    fs::create_dir_all(auth_dir).await?;
+    fs::write(&layout_path, content).await?;
     Ok(())
 }
 
 /// Write menus.json from exported menus or empty array
-/// Transforms MenuConfig[] to MenuItem[] for frontend consumption
-fn write_menus(output_dir: &Path, menus_json: Option<&str>) -> Result<()> {
+async fn write_menus(output_dir: &Path, menus_json: Option<&str>) -> Result<()> {
     let menus_path = output_dir.join("src").join("menus.json");
 
     let content = if let Some(json_str) = menus_json {
-        // Parse the MenuConfig[] from binary export
         let menu_configs: Vec<serde_json::Value> =
             serde_json::from_str(json_str).unwrap_or_default();
 
-        // Flatten: extract all items from each MenuConfig
         let menu_items: Vec<serde_json::Value> = menu_configs
             .into_iter()
             .filter_map(|config| config.get("items").cloned())
@@ -564,25 +612,23 @@ fn write_menus(output_dir: &Path, menus_json: Option<&str>) -> Result<()> {
         "[]".to_string()
     };
 
-    fs::write(&menus_path, content)?;
+    fs::write(&menus_path, content).await?;
     info!("Wrote menus.json");
     Ok(())
 }
 
 /// Write plugins.json from exported plugins or empty array
-fn write_plugins(output_dir: &Path, plugins_json: Option<&str>) -> Result<()> {
+async fn write_plugins(output_dir: &Path, plugins_json: Option<&str>) -> Result<()> {
     let plugins_path = output_dir.join("src").join("plugins.json");
     let content = plugins_json.unwrap_or("[]");
-    fs::write(&plugins_path, content)?;
+    fs::write(&plugins_path, content).await?;
     info!("Wrote plugins.json");
     Ok(())
 }
 
 /// Copy plugin frontend files into the output directory
-/// Parses plugins_json to get frontend_path and copies route groups
-/// Plugins go under (auth)/<plugin-name>/ since they require authentication
-/// Returns true if any plugins were copied
-fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Result<bool> {
+/// Uses parallel copying for better performance
+async fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Result<bool> {
     let Some(json_str) = plugins_json else {
         return Ok(false);
     };
@@ -604,17 +650,14 @@ fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Resul
             continue;
         }
 
-        // Destination: .yeollin/app/src/app/(auth)/<plugin-name>/
-        // Plugins require authentication, so they go under (auth)/
         let dest_base = output_dir
             .join("src")
             .join("app")
             .join("(auth)")
             .join(name);
 
-        // Scan for route groups (folders starting with parentheses) and copy their contents
-        for entry in fs::read_dir(frontend_dir)? {
-            let entry = entry?;
+        let mut entries = fs::read_dir(frontend_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
             let entry_path = entry.path();
 
             if !entry_path.is_dir() {
@@ -624,11 +667,8 @@ fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Resul
             let dir_name = entry.file_name();
             let dir_name_str = dir_name.to_str().unwrap_or("");
 
-            // Check if it's a route group like (example)
             if dir_name_str.starts_with('(') && dir_name_str.ends_with(')') {
-                // Copy contents of route group to plugin destination
-                // e.g., (example)/items/* -> <plugin-name>/items/*
-                copy_dir_contents(&entry_path, &dest_base)?;
+                copy_dir_contents_parallel(&entry_path, &dest_base).await?;
                 info!("Copied plugin frontend: {} from {}", name, dir_name_str);
                 copied_any = true;
             }
@@ -638,39 +678,81 @@ fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Resul
     Ok(copied_any)
 }
 
-/// Copy contents of a directory to destination (not the directory itself)
-/// Handles nested folders and files
-fn copy_dir_contents(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst)?;
+/// Copy contents of a directory to destination with parallel file copying
+async fn copy_dir_contents_parallel(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst).await?;
 
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
+    // Collect all files and directories first
+    let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut dirs: Vec<(PathBuf, PathBuf)> = Vec::new();
+
+    let mut entries = fs::read_dir(src).await?;
+    while let Some(entry) = entries.next_entry().await? {
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
 
         if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
+            dirs.push((src_path, dst_path));
         } else {
-            fs::copy(&src_path, &dst_path)?;
+            files.push((src_path, dst_path));
         }
+    }
+
+    // Copy files in parallel
+    let mut futures = FuturesUnordered::new();
+    for (src_path, dst_path) in files {
+        futures.push(async move { fs::copy(&src_path, &dst_path).await });
+    }
+    while let Some(result) = futures.next().await {
+        result?;
+    }
+
+    // Recurse into directories in parallel
+    let mut dir_futures = FuturesUnordered::new();
+    for (src_path, dst_path) in dirs {
+        dir_futures.push(copy_dir_recursive_parallel(src_path, dst_path));
+    }
+    while let Some(result) = dir_futures.next().await {
+        result?;
     }
 
     Ok(())
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst)?;
+async fn copy_dir_recursive_parallel(src: PathBuf, dst: PathBuf) -> Result<()> {
+    fs::create_dir_all(&dst).await?;
 
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
+    let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut dirs: Vec<(PathBuf, PathBuf)> = Vec::new();
+
+    let mut entries = fs::read_dir(&src).await?;
+    while let Some(entry) = entries.next_entry().await? {
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
 
         if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
+            dirs.push((src_path, dst_path));
         } else {
-            fs::copy(&src_path, &dst_path)?;
+            files.push((src_path, dst_path));
         }
+    }
+
+    // Copy files in parallel
+    let mut futures = FuturesUnordered::new();
+    for (src_path, dst_path) in files {
+        futures.push(async move { fs::copy(&src_path, &dst_path).await });
+    }
+    while let Some(result) = futures.next().await {
+        result?;
+    }
+
+    // Recurse into directories in parallel
+    let mut dir_futures = FuturesUnordered::new();
+    for (src_path, dst_path) in dirs {
+        dir_futures.push(copy_dir_recursive_parallel(src_path, dst_path));
+    }
+    while let Some(result) = dir_futures.next().await {
+        result?;
     }
 
     Ok(())

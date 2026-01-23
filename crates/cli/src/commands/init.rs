@@ -4,8 +4,8 @@
 
 use anyhow::Result;
 use clap::Args;
-use std::fs;
 use std::path::PathBuf;
+use tokio::fs;
 use tracing::info;
 
 #[derive(Args)]
@@ -51,19 +51,34 @@ pub async fn run(args: InitArgs) -> Result<()> {
     let app_dir = plugin_dir.join("app");
     let app_plugin_dir = app_dir.join(format!("({})", plugin_name));
 
-    fs::create_dir_all(&api_routes_dir)?;
-    fs::create_dir_all(&app_plugin_dir)?;
+    // Create directories in parallel
+    tokio::try_join!(
+        fs::create_dir_all(&api_routes_dir),
+        fs::create_dir_all(&app_plugin_dir),
+    )?;
 
-    // Generate API files
-    generate_api_cargo_toml(&api_dir, &app_name, &args.description)?;
-    generate_api_lib_rs(&api_src_dir, &plugin_name, &args.description)?;
-    generate_api_routes_mod(&api_src_dir)?;
-    generate_api_routes_api_mod(&api_src_dir.join("routes").join("api"), &plugin_name)?;
-    generate_api_routes_plugin_mod(&api_routes_dir, &plugin_name)?;
+    // Pre-compute all content (CPU-bound, synchronous)
+    let cargo_toml_content = generate_cargo_toml_content(&app_name, &args.description);
+    let lib_rs_content = generate_lib_rs_content(&plugin_name, &args.description);
+    let routes_mod_content = generate_routes_mod_content();
+    let routes_api_mod_content = generate_routes_api_mod_content(&plugin_name);
+    let routes_plugin_mod_content = generate_routes_plugin_mod_content(&plugin_name);
+    let package_json_content = generate_package_json_content(&app_name);
+    let page_tsx_content = generate_page_tsx_content(&plugin_name);
 
-    // Generate frontend files (simplified - no standalone Next.js setup)
-    generate_package_json(&plugin_dir, &app_name)?;
-    generate_app_page_tsx(&app_plugin_dir, &plugin_name)?;
+    // Write ALL files IN PARALLEL
+    tokio::try_join!(
+        fs::write(api_dir.join("Cargo.toml"), &cargo_toml_content),
+        fs::write(api_src_dir.join("lib.rs"), &lib_rs_content),
+        fs::write(api_src_dir.join("routes").join("mod.rs"), &routes_mod_content),
+        fs::write(
+            api_src_dir.join("routes").join("api").join("mod.rs"),
+            &routes_api_mod_content
+        ),
+        fs::write(api_routes_dir.join("mod.rs"), &routes_plugin_mod_content),
+        fs::write(plugin_dir.join("package.json"), &package_json_content),
+        fs::write(app_plugin_dir.join("page.tsx"), &page_tsx_content),
+    )?;
 
     info!(
         "Plugin '{}' created at {}",
@@ -119,11 +134,11 @@ fn to_pascal_case(name: &str) -> String {
 }
 
 // ============================================================================
-// API Generation
+// Content Generation (pure functions, no I/O)
 // ============================================================================
 
-fn generate_api_cargo_toml(api_dir: &PathBuf, name: &str, description: &str) -> Result<()> {
-    let content = format!(
+fn generate_cargo_toml_content(name: &str, description: &str) -> String {
+    format!(
         r#"[package]
 name = "{name}"
 version = "0.1.0"
@@ -139,14 +154,11 @@ vespera = {{ workspace = true }}
 serde = {{ workspace = true }}
 serde_json = {{ workspace = true }}
 "#
-    );
-
-    fs::write(api_dir.join("Cargo.toml"), content)?;
-    Ok(())
+    )
 }
 
-fn generate_api_lib_rs(src_dir: &PathBuf, name: &str, description: &str) -> Result<()> {
-    let content = format!(
+fn generate_lib_rs_content(name: &str, description: &str) -> String {
+    format!(
         r#"//! {description}
 
 mod routes;
@@ -156,38 +168,30 @@ yeollin_plugin::yeollin_plugin! {{
     description: "{description}",
 }}
 "#
-    );
-
-    fs::write(src_dir.join("lib.rs"), content)?;
-    Ok(())
+    )
 }
 
-fn generate_api_routes_mod(src_dir: &PathBuf) -> Result<()> {
-    let content = r#"//! Route handlers
+fn generate_routes_mod_content() -> String {
+    r#"//! Route handlers
 
 pub mod api;
-"#;
-
-    fs::write(src_dir.join("routes").join("mod.rs"), content)?;
-    Ok(())
+"#
+    .to_string()
 }
 
-fn generate_api_routes_api_mod(api_dir: &PathBuf, name: &str) -> Result<()> {
+fn generate_routes_api_mod_content(name: &str) -> String {
     let rust_name = to_rust_ident(name);
-    let content = format!(
+    format!(
         r#"//! API routes
 
 pub mod {rust_name};
 "#
-    );
-
-    fs::write(api_dir.join("mod.rs"), content)?;
-    Ok(())
+    )
 }
 
-fn generate_api_routes_plugin_mod(plugin_routes_dir: &PathBuf, name: &str) -> Result<()> {
+fn generate_routes_plugin_mod_content(name: &str) -> String {
     let pascal_name = to_pascal_case(name);
-    let content = format!(
+    format!(
         r#"//! /{name} API routes
 
 use serde::{{Deserialize, Serialize}};
@@ -235,18 +239,11 @@ pub async fn get(
     }}
 }}
 "#
-    );
-
-    fs::write(plugin_routes_dir.join("mod.rs"), content)?;
-    Ok(())
+    )
 }
 
-// ============================================================================
-// Frontend Generation
-// ============================================================================
-
-fn generate_package_json(plugin_dir: &PathBuf, name: &str) -> Result<()> {
-    let content = format!(
+fn generate_package_json_content(name: &str) -> String {
+    format!(
         r#"{{
   "name": "@yeollin-plugin/{name}",
   "version": "0.1.0",
@@ -257,15 +254,12 @@ fn generate_package_json(plugin_dir: &PathBuf, name: &str) -> Result<()> {
   }}
 }}
 "#
-    );
-
-    fs::write(plugin_dir.join("package.json"), content)?;
-    Ok(())
+    )
 }
 
-fn generate_app_page_tsx(plugin_app_dir: &PathBuf, name: &str) -> Result<()> {
+fn generate_page_tsx_content(name: &str) -> String {
     let pascal_name = to_pascal_case(name);
-    let content = format!(
+    format!(
         r#""use client";
 
 import {{ Box, Flex, Text }} from "@devup-ui/react";
@@ -290,8 +284,5 @@ export default function {pascal_name}Page() {{
   );
 }}
 "#
-    );
-
-    fs::write(plugin_app_dir.join("page.tsx"), content)?;
-    Ok(())
+    )
 }

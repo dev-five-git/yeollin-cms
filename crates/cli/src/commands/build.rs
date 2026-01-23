@@ -66,7 +66,7 @@ pub async fn run(args: BuildArgs) -> Result<()> {
 
     // 2. Export menus and plugins from binary (after build)
     let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
-        let binary_path = find_binary_path(crate_path)?;
+        let binary_path = find_binary_path(crate_path).await?;
 
         info!("Exporting menus from binary...");
         let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {

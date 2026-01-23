@@ -7,12 +7,13 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode, DebounceEventResult};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::Duration;
+use tokio::fs;
 use tokio::process::Command;
+use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, info, warn};
 
 use super::prebuild::{
@@ -67,7 +68,7 @@ pub async fn run(args: DevArgs) -> Result<()> {
 
     // 2. Export menus and plugins from binary (after build)
     let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
-        let binary_path = find_binary_path(crate_path)?;
+        let binary_path = find_binary_path(crate_path).await?;
 
         info!("Exporting menus from binary...");
         let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {
@@ -254,7 +255,7 @@ fn strip_route_groups(path: &Path) -> PathBuf {
 
 /// Sync a single file from app/ to .yeollin/app/src/app/
 /// Determines if it's a public or auth route based on (public) marker in path
-fn sync_file(src_path: &Path, app_path: &Path, yeollin_app_dir: &Path) -> Result<()> {
+async fn sync_file(src_path: &Path, app_path: &Path, yeollin_app_dir: &Path) -> Result<()> {
     // Get relative path from app directory
     let rel_path = match src_path.strip_prefix(app_path) {
         Ok(p) => p,
@@ -291,9 +292,9 @@ fn sync_file(src_path: &Path, app_path: &Path, yeollin_app_dir: &Path) -> Result
     if src_path.exists() && src_path.is_file() {
         // Create parent directories and copy file
         if let Some(parent) = dest_path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).await?;
         }
-        fs::copy(src_path, &dest_path)?;
+        fs::copy(src_path, &dest_path).await?;
         info!(
             "Synced {} -> {} ({})",
             rel_str,
@@ -303,7 +304,7 @@ fn sync_file(src_path: &Path, app_path: &Path, yeollin_app_dir: &Path) -> Result
     } else if !src_path.exists() {
         // File was deleted, remove from destination
         if dest_path.exists() {
-            fs::remove_file(&dest_path)?;
+            fs::remove_file(&dest_path).await?;
             info!("Removed {}", dest_path.display());
         }
     }
@@ -311,15 +312,28 @@ fn sync_file(src_path: &Path, app_path: &Path, yeollin_app_dir: &Path) -> Result
     Ok(())
 }
 
+/// File sync event to send from watcher thread to async task
+struct SyncEvent {
+    path: PathBuf,
+    app_path: PathBuf,
+    yeollin_app_dir: PathBuf,
+}
+
 /// Start file watcher for app/ directory
-/// Returns a JoinHandle that runs the watcher in a blocking task
+/// Uses a hybrid approach: blocking watcher in a thread, async file ops via channel
 fn start_file_watcher(
     frontend: &AppFrontend,
     yeollin_app_dir: PathBuf,
 ) -> Result<tokio::task::JoinHandle<()>> {
     let app_path = frontend.app_path.clone();
+    let app_path_for_watcher = app_path.clone();
+    let yeollin_dir_for_events = yeollin_app_dir.clone();
 
-    let handle = tokio::task::spawn_blocking(move || {
+    // Channel to send file events from blocking watcher to async handler
+    let (event_tx, mut event_rx) = tokio_mpsc::unbounded_channel::<SyncEvent>();
+
+    // Spawn blocking task for the file watcher (notify requires blocking)
+    let _watcher_handle = std::thread::spawn(move || {
         let (tx, rx) = mpsc::channel::<DebounceEventResult>();
 
         let mut debouncer = match new_debouncer(Duration::from_millis(500), tx) {
@@ -330,12 +344,19 @@ fn start_file_watcher(
             }
         };
 
-        if let Err(e) = debouncer.watcher().watch(&app_path, RecursiveMode::Recursive) {
-            warn!("Failed to watch directory {}: {}", app_path.display(), e);
+        if let Err(e) = debouncer
+            .watcher()
+            .watch(&app_path_for_watcher, RecursiveMode::Recursive)
+        {
+            warn!(
+                "Failed to watch directory {}: {}",
+                app_path_for_watcher.display(),
+                e
+            );
             return;
         }
 
-        info!("File watcher started for {}", app_path.display());
+        info!("File watcher started for {}", app_path_for_watcher.display());
 
         // Process file change events
         loop {
@@ -356,20 +377,31 @@ fn start_file_watcher(
                             continue;
                         }
 
-                        // Sync the changed file
-                        if let Err(e) = sync_file(path, &app_path, &yeollin_app_dir) {
-                            warn!("Failed to sync {}: {}", path.display(), e);
-                        }
+                        // Send event to async handler
+                        let _ = event_tx.send(SyncEvent {
+                            path: path.clone(),
+                            app_path: app_path_for_watcher.clone(),
+                            yeollin_app_dir: yeollin_dir_for_events.clone(),
+                        });
                     }
                 }
                 Ok(Err(error)) => {
                     warn!("Watch error: {}", error);
                 }
-                Err(e) => {
+                Err(_) => {
                     // Channel closed, watcher is done
-                    debug!("File watcher channel closed: {}", e);
+                    debug!("File watcher channel closed");
                     break;
                 }
+            }
+        }
+    });
+
+    // Spawn async task to handle file sync operations
+    let handle = tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            if let Err(e) = sync_file(&event.path, &event.app_path, &event.yeollin_app_dir).await {
+                warn!("Failed to sync {}: {}", event.path.display(), e);
             }
         }
     });
