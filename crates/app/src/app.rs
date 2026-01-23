@@ -42,12 +42,22 @@ pub struct PluginInfo {
 #[derive(Clone)]
 pub struct SharedPlugins(pub Arc<Vec<PluginInfo>>);
 
+/// Stored plugin init callback with name for logging
+pub struct PluginInitCallback {
+    pub name: String,
+    pub callback: yeollin_plugin::PluginInitFn,
+}
+
 /// Yeollin CMS Application
 pub struct YeollinApp {
     router: Router,
     menus: Vec<MenuConfig>,
     plugins: Vec<PluginInfo>,
     state: AppState,
+    /// Database connection (if configured)
+    database: Option<DatabaseConnection>,
+    /// Plugin initialization callbacks
+    init_callbacks: Vec<PluginInitCallback>,
 }
 
 impl YeollinApp {
@@ -66,6 +76,32 @@ impl YeollinApp {
         if std::env::var("YEOLLIN_EXPORT_PLUGINS").is_ok() {
             println!("{}", self.export_plugins_json());
             return Ok(());
+        }
+
+        // Run plugin initialization callbacks if database is available
+        if let Some(db) = &self.database {
+            for init in &self.init_callbacks {
+                tracing::info!(plugin = %init.name, "Running plugin initialization");
+                if let Err(e) = (init.callback)(db.clone()).await {
+                    tracing::error!(plugin = %init.name, error = %e, "Plugin initialization failed");
+                    return Err(anyhow::anyhow!(
+                        "Plugin '{}' initialization failed: {}",
+                        init.name,
+                        e
+                    ));
+                }
+                tracing::info!(plugin = %init.name, "Plugin initialization completed");
+            }
+        } else if !self.init_callbacks.is_empty() {
+            tracing::warn!(
+                "Plugins with on_init callbacks registered but no database configured. \
+                 Skipping initialization for: {}",
+                self.init_callbacks
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
 
         let server = Server::new(self.router, self.state);
@@ -262,6 +298,7 @@ impl YeollinAppBuilder {
         let mut router = Router::new();
         let mut menus = vec![];
         let mut plugins = vec![];
+        let mut init_callbacks = vec![];
 
         // Merge external routers (e.g., vespera)
         for external_router in self.routers {
@@ -273,6 +310,7 @@ impl YeollinAppBuilder {
             tracing::info!(
                 plugin = plugin.name,
                 has_frontend = plugin.frontend.has_frontend(),
+                has_on_init = plugin.on_init.is_some(),
                 "Merging plugin router"
             );
 
@@ -285,6 +323,14 @@ impl YeollinAppBuilder {
                 license: plugin.license.map(|s| s.to_string()),
                 frontend_path: plugin.frontend_path.map(|s| s.to_string()),
             });
+
+            // Collect on_init callback if present
+            if let Some(callback) = plugin.on_init {
+                init_callbacks.push(PluginInitCallback {
+                    name: plugin.name.to_string(),
+                    callback,
+                });
+            }
 
             // Merge the router
             router = router.merge(plugin.router);
@@ -313,8 +359,8 @@ impl YeollinAppBuilder {
             .layer(Extension(shared_plugins));
 
         // Add database connection if configured
-        if let Some(db) = self.database {
-            router = router.layer(Extension(db));
+        if let Some(ref db) = self.database {
+            router = router.layer(Extension(db.clone()));
             tracing::info!("Database connection configured");
         }
 
@@ -388,6 +434,8 @@ impl YeollinAppBuilder {
             menus,
             plugins,
             state,
+            database: self.database,
+            init_callbacks,
         }
     }
 }

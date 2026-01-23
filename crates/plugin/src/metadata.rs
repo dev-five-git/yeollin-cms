@@ -2,6 +2,17 @@
 
 use crate::FrontendAssets;
 use axum::Router;
+use sea_orm::DatabaseConnection;
+use std::future::Future;
+use std::pin::Pin;
+
+/// Type alias for plugin initialization function
+/// Called when plugin is loaded with database connection available
+pub type PluginInitFn = Box<
+    dyn Fn(DatabaseConnection) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Plugin metadata containing all information needed to register a plugin
 pub struct PluginMetadata {
@@ -21,6 +32,8 @@ pub struct PluginMetadata {
     pub frontend: FrontendAssets,
     /// Frontend path on filesystem (for prebuild)
     pub frontend_path: Option<&'static str>,
+    /// Optional initialization callback (called with database connection)
+    pub on_init: Option<PluginInitFn>,
 }
 
 impl PluginMetadata {
@@ -35,6 +48,7 @@ impl PluginMetadata {
             router: Router::new(),
             frontend: FrontendAssets::empty(),
             frontend_path: None,
+            on_init: None,
         }
     }
 }
@@ -49,6 +63,7 @@ pub struct PluginMetadataBuilder {
     router: Router,
     frontend: FrontendAssets,
     frontend_path: Option<&'static str>,
+    on_init: Option<PluginInitFn>,
 }
 
 impl PluginMetadataBuilder {
@@ -88,6 +103,27 @@ impl PluginMetadataBuilder {
         self
     }
 
+    /// Set initialization callback (called with database connection when available)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// PluginMetadata::builder("my-plugin", "1.0.0")
+    ///     .on_init(|db| Box::pin(async move {
+    ///         // Run migrations, seed data, etc.
+    ///         Ok(())
+    ///     }))
+    ///     .build()
+    /// ```
+    pub fn on_init<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(DatabaseConnection) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.on_init = Some(Box::new(move |db| Box::pin(f(db))));
+        self
+    }
+
     /// Build the plugin metadata
     pub fn build(self) -> PluginMetadata {
         PluginMetadata {
@@ -99,6 +135,7 @@ impl PluginMetadataBuilder {
             router: self.router,
             frontend: self.frontend,
             frontend_path: self.frontend_path,
+            on_init: self.on_init,
         }
     }
 }

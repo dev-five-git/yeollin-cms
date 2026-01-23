@@ -13,3 +13,5 @@ serde_json = { workspace = true }
 sea-orm = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }
+vespertide = { workspace = true }
+anyhow = { workspace = true }

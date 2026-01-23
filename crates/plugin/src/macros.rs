@@ -96,6 +96,32 @@ macro_rules! yeollin_plugin {
         }
     };
 
+    // Full: name, author, description, custom router, on_init callback
+    (
+        name: $name:literal,
+        author: $author:literal,
+        description: $desc:literal,
+        router: $router:expr,
+        on_init: $on_init:expr $(,)?
+    ) => {
+        use $crate::{FrontendAssets, PluginMetadata};
+
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/app");
+
+        /// Plugin metadata entry point
+        pub fn metadata() -> PluginMetadata {
+            PluginMetadata::builder($name, env!("CARGO_PKG_VERSION"))
+                .author($author)
+                .description($desc)
+                .license(env!("CARGO_PKG_LICENSE"))
+                .router($router)
+                .on_init($on_init)
+                .frontend(FrontendAssets::from_path($name, FRONTEND_PATH))
+                .frontend_path(FRONTEND_PATH)
+                .build()
+        }
+    };
+
     // API-only: name, author, description, no frontend, default vespera router
     (
         name: $name:literal,

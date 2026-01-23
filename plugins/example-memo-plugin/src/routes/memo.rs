@@ -1,11 +1,11 @@
 //! Memo CRUD routes
 
 use axum::{extract::Path, Extension, Json};
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, QueryOrder, Set};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Order, QueryOrder, Set};
 use serde::{Deserialize, Serialize};
 use vespera::Schema;
 
-use crate::entities::{memo, Memo};
+use crate::models::memo;
 
 /// Memo response
 #[derive(Serialize, Schema)]
@@ -67,8 +67,8 @@ pub struct ErrorResponse {
 pub async fn list_memos(
     Extension(db): Extension<DatabaseConnection>,
 ) -> Result<Json<ListMemosResponse>, (axum::http::StatusCode, Json<ErrorResponse>)> {
-    let memos = Memo::find()
-        .order_by_desc(memo::Column::CreatedAt)
+    let memos = memo::Entity::find()
+        .order_by(memo::Column::CreatedAt, Order::Desc)
         .all(&db)
         .await
         .map_err(|e| {
@@ -93,7 +93,7 @@ pub async fn get_memo(
     Extension(db): Extension<DatabaseConnection>,
     Path(id): Path<i32>,
 ) -> Result<Json<MemoResponse>, (axum::http::StatusCode, Json<ErrorResponse>)> {
-    let memo = Memo::find_by_id(id).one(&db).await.map_err(|e| {
+    let memo = memo::Entity::find_by_id(id).one(&db).await.map_err(|e| {
         (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
@@ -125,8 +125,8 @@ pub async fn create_memo(
     let memo = memo::ActiveModel {
         title: Set(req.title),
         content: Set(req.content),
-        created_at: Set(now),
-        updated_at: Set(now),
+        created_at: Set(now.into()),
+        updated_at: Set(now.into()),
         ..Default::default()
     };
 
@@ -150,7 +150,7 @@ pub async fn update_memo(
     Path(id): Path<i32>,
     Json(req): Json<UpdateMemoRequest>,
 ) -> Result<Json<MemoResponse>, (axum::http::StatusCode, Json<ErrorResponse>)> {
-    let memo = Memo::find_by_id(id).one(&db).await.map_err(|e| {
+    let memo = memo::Entity::find_by_id(id).one(&db).await.map_err(|e| {
         (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
@@ -180,7 +180,7 @@ pub async fn update_memo(
     if let Some(content) = req.content {
         memo.content = Set(content);
     }
-    memo.updated_at = Set(chrono::Utc::now());
+    memo.updated_at = Set(chrono::Utc::now().into());
 
     let memo = memo.update(&db).await.map_err(|e| {
         (
@@ -201,7 +201,7 @@ pub async fn delete_memo(
     Extension(db): Extension<DatabaseConnection>,
     Path(id): Path<i32>,
 ) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, Json<ErrorResponse>)> {
-    let result = Memo::delete_by_id(id).exec(&db).await.map_err(|e| {
+    let result = memo::Entity::delete_by_id(id).exec(&db).await.map_err(|e| {
         (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {

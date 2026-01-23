@@ -31,10 +31,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Database
-sea-orm = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
+sea-orm = { version = "^2.0.0-rc", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
 
 # OpenAPI
-vespera = "0.1"
+vespera = "^0.1"
+vespertide = "^0.1"
 
 # Tracing
 tracing = "0.1"
