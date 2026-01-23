@@ -278,8 +278,19 @@ pub async fn run_prebuild(
     write_menus(output_dir, menus_json)?;
     write_plugins(output_dir, plugins_json)?;
 
-    // 7. Copy plugin frontend files
-    copy_plugin_frontends(output_dir, plugins_json)?;
+    // 7. Copy plugin frontend files (goes under (auth)/)
+    let has_plugins = copy_plugin_frontends(output_dir, plugins_json)?;
+
+    // 8. Ensure (auth)/layout.tsx exists if plugins were copied
+    // Template should already have it, but generate if missing
+    if has_plugins {
+        let auth_dir = output_dir.join("src").join("app").join("(auth)");
+        let auth_layout = auth_dir.join("layout.tsx");
+        if !auth_layout.exists() {
+            generate_auth_layout(&auth_dir)?;
+            info!("Generated (auth)/layout.tsx for plugins");
+        }
+    }
 
     info!("Prebuild complete!");
     Ok(())
@@ -319,10 +330,13 @@ fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
                 format!("Failed to remove existing output: {}", output_dir.display())
             })?;
         } else {
-            // Clean only the app symlink directory, keep rest
-            let app_link_dir = output_dir.join("src").join("app").join("(app)");
-            if app_link_dir.exists() {
-                fs::remove_dir_all(&app_link_dir)?;
+            // Clean route group directories, keep rest
+            let app_base = output_dir.join("src").join("app");
+            for dir_name in ["(public)", "(auth)", "(app)"] {
+                let dir = app_base.join(dir_name);
+                if dir.exists() {
+                    fs::remove_dir_all(&dir)?;
+                }
             }
         }
     }
@@ -389,18 +403,127 @@ fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
 }
 
 /// Link or copy frontend directory into the app
-/// App frontend goes directly to (app)/ - no name prefix (routes at root level)
-/// This differs from plugins which get a name prefix for namespaced routes
+/// Separates routes into (public)/ and (auth)/ based on (public) marker in source path
+/// - Routes with (public) anywhere in path → src/app/(public)/...
+/// - Routes without (public) → src/app/(auth)/...
 fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bool) -> Result<()> {
-    // Frontend goes under src/app/(app)/ for Next.js App Router
-    // App contents go directly to (app)/ - routes at root level (e.g., /signin, not /example-app/signin)
-    let app_dir = output_dir.join("src").join("app").join("(app)");
-    fs::create_dir_all(&app_dir)?;
+    use walkdir::WalkDir;
 
-    // Copy contents of app frontend directly to (app)/ without app name prefix
-    copy_dir_contents(&frontend.app_path, &app_dir)?;
-    debug!("Copied app frontend contents to {}", app_dir.display());
+    let public_dir = output_dir.join("src").join("app").join("(public)");
+    let auth_dir = output_dir.join("src").join("app").join("(auth)");
 
+    let mut has_public_routes = false;
+    let mut has_auth_routes = false;
+
+    // Walk all files in frontend directory
+    for entry in WalkDir::new(&frontend.app_path) {
+        let entry = entry?;
+        let src_path = entry.path();
+
+        // Skip directories, we only care about files
+        if src_path.is_dir() {
+            continue;
+        }
+
+        // Get relative path from app_path
+        let rel_path = src_path
+            .strip_prefix(&frontend.app_path)
+            .unwrap_or(src_path);
+        let rel_str = rel_path.to_string_lossy();
+
+        // Check if (public) appears anywhere in the path
+        let is_public = rel_str.contains("(public)");
+
+        // Build clean path by stripping all route groups like (xxx)
+        let clean_path = strip_route_groups(rel_path);
+
+        // Determine destination
+        let dest_path = if is_public {
+            has_public_routes = true;
+            public_dir.join(&clean_path)
+        } else {
+            has_auth_routes = true;
+            auth_dir.join(&clean_path)
+        };
+
+        // Create parent directories and copy file
+        if let Some(parent) = dest_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(src_path, &dest_path)?;
+        debug!(
+            "Copied {} -> {} ({})",
+            rel_str,
+            dest_path.display(),
+            if is_public { "public" } else { "auth" }
+        );
+    }
+
+    // Generate layout files only if they don't already exist (template may have them)
+    if has_public_routes {
+        let public_layout = public_dir.join("layout.tsx");
+        if !public_layout.exists() {
+            generate_public_layout(&public_dir)?;
+            info!("Generated (public)/layout.tsx");
+        }
+    }
+    if has_auth_routes {
+        let auth_layout = auth_dir.join("layout.tsx");
+        if !auth_layout.exists() {
+            generate_auth_layout(&auth_dir)?;
+            info!("Generated (auth)/layout.tsx");
+        }
+    }
+
+    Ok(())
+}
+
+/// Strip all route groups (parenthesized segments) from a path
+/// e.g., "aa/bb/(public)/cc/page.tsx" -> "aa/bb/cc/page.tsx"
+fn strip_route_groups(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        if let std::path::Component::Normal(name) = component {
+            let name_str = name.to_string_lossy();
+            // Skip route groups like (public), (dashboard), etc.
+            if !(name_str.starts_with('(') && name_str.ends_with(')')) {
+                result.push(name);
+            }
+        }
+    }
+    result
+}
+
+/// Generate a minimal layout for public routes (no auth required)
+fn generate_public_layout(public_dir: &Path) -> Result<()> {
+    let layout_path = public_dir.join("layout.tsx");
+    let content = r#"export default function PublicLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return <>{children}</>;
+}
+"#;
+    fs::create_dir_all(public_dir)?;
+    fs::write(&layout_path, content)?;
+    Ok(())
+}
+
+/// Generate a minimal layout for authenticated routes
+fn generate_auth_layout(auth_dir: &Path) -> Result<()> {
+    let layout_path = auth_dir.join("layout.tsx");
+    let content = r#"export default function AuthLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  // TODO: Add authentication check here
+  return <>{children}</>;
+}
+"#;
+    fs::create_dir_all(auth_dir)?;
+    fs::write(&layout_path, content)?;
     Ok(())
 }
 
@@ -443,12 +566,15 @@ fn write_plugins(output_dir: &Path, plugins_json: Option<&str>) -> Result<()> {
 
 /// Copy plugin frontend files into the output directory
 /// Parses plugins_json to get frontend_path and copies route groups
-fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Result<()> {
+/// Plugins go under (auth)/<plugin-name>/ since they require authentication
+/// Returns true if any plugins were copied
+fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Result<bool> {
     let Some(json_str) = plugins_json else {
-        return Ok(());
+        return Ok(false);
     };
 
     let plugins: Vec<serde_json::Value> = serde_json::from_str(json_str).unwrap_or_default();
+    let mut copied_any = false;
 
     for plugin in plugins {
         let Some(name) = plugin.get("name").and_then(|v| v.as_str()) else {
@@ -464,8 +590,13 @@ fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Resul
             continue;
         }
 
-        // Destination: .yeollin/app/src/app/(app)/<plugin-name>/
-        let dest_base = output_dir.join("src").join("app").join("(app)").join(name);
+        // Destination: .yeollin/app/src/app/(auth)/<plugin-name>/
+        // Plugins require authentication, so they go under (auth)/
+        let dest_base = output_dir
+            .join("src")
+            .join("app")
+            .join("(auth)")
+            .join(name);
 
         // Scan for route groups (folders starting with parentheses) and copy their contents
         for entry in fs::read_dir(frontend_dir)? {
@@ -485,11 +616,12 @@ fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Resul
                 // e.g., (example)/items/* -> <plugin-name>/items/*
                 copy_dir_contents(&entry_path, &dest_base)?;
                 info!("Copied plugin frontend: {} from {}", name, dir_name_str);
+                copied_any = true;
             }
         }
     }
 
-    Ok(())
+    Ok(copied_any)
 }
 
 /// Copy contents of a directory to destination (not the directory itself)

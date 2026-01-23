@@ -1,8 +1,6 @@
 import { ThemeScript } from '@devup-ui/react'
-import { Box, Flex } from '@devup-ui/react'
 import type { Metadata } from 'next'
 
-import { Sidebar } from '@/components/layout/Sidebar'
 import { Providers } from '@/components/providers'
 
 export const metadata: Metadata = {
@@ -21,14 +19,7 @@ export default function RootLayout({
         <ThemeScript />
       </head>
       <body>
-        <Providers>
-          <Flex h="100vh">
-            <Sidebar />
-            <Box flex={1} overflow="auto" bg="$backgroundSecondary">
-              {children}
-            </Box>
-          </Flex>
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   )
