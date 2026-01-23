@@ -175,7 +175,10 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
     info!("Prebuild starting...");
     info!("  Current dir: {}", current_dir.display());
     info!("  Output:      {}", output_dir.display());
-    info!("  Mode:        {}", if args.proxy { "proxy" } else { "copy" });
+    info!(
+        "  Mode:        {}",
+        if args.proxy { "proxy" } else { "copy" }
+    );
     if let Some(ref dir) = crate_dir {
         info!("  Crate:       {}", dir.display());
     }
@@ -795,11 +798,7 @@ async fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) ->
             continue;
         }
 
-        let dest_base = output_dir
-            .join("src")
-            .join("app")
-            .join("(auth)")
-            .join(name);
+        let dest_base = output_dir.join("src").join("app").join("(auth)").join(name);
 
         let mut entries = fs::read_dir(frontend_dir).await?;
         while let Some(entry) = entries.next_entry().await? {

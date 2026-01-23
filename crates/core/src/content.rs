@@ -19,15 +19,11 @@ pub struct ContentMeta {
 /// Content status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Schema)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ContentStatus {
+    #[default]
     Draft,
     Review,
     Published,
     Archived,
-}
-
-impl Default for ContentStatus {
-    fn default() -> Self {
-        Self::Draft
-    }
 }

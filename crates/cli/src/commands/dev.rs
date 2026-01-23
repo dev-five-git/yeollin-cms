@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use clap::Args;
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind};
+use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::mpsc;
@@ -188,11 +188,14 @@ pub async fn run(args: DevArgs) -> Result<()> {
 
     // 6. Start API server
     let mut cargo_handle = if let Some(ref crate_path) = crate_dir {
-        Some(start_rust_server(
-            crate_path,
-            args.port,
-            frontend.is_some().then_some(args.internal_frontend_port),
-        ).await?)
+        Some(
+            start_rust_server(
+                crate_path,
+                args.port,
+                frontend.is_some().then_some(args.internal_frontend_port),
+            )
+            .await?,
+        )
     } else {
         None
     };
@@ -201,7 +204,7 @@ pub async fn run(args: DevArgs) -> Result<()> {
 
     // 7. Start file watcher for proxy mode (with restart channel)
     let (restart_tx, mut restart_rx) = tokio_mpsc::channel::<()>(1);
-    
+
     let watcher_handle = if !args.copy_mode && frontend.is_some() {
         let frontend_clone = frontend.clone().unwrap();
         let yeollin_app_dir_clone = yeollin_app_dir.clone();
@@ -229,7 +232,7 @@ pub async fn run(args: DevArgs) -> Result<()> {
     loop {
         tokio::select! {
             // Handle Next.js exit
-            result = async { 
+            result = async {
                 match next_handle.as_mut() {
                     Some(h) => Some(h.wait().await),
                     None => std::future::pending().await,
@@ -245,7 +248,7 @@ pub async fn run(args: DevArgs) -> Result<()> {
                 }
                 break;
             }
-            
+
             // Handle Rust server exit (without restart signal = real exit)
             result = async {
                 match cargo_handle.as_mut() {
@@ -263,24 +266,24 @@ pub async fn run(args: DevArgs) -> Result<()> {
                 }
                 break;
             }
-            
+
             // Handle restart signal from file watcher
             _ = restart_rx.recv() => {
                 if let Some(ref crate_path) = crate_dir {
                     info!("Restarting Rust server to pick up route changes...");
-                    
+
                     // Kill current server
                     if let Some(ref mut cargo) = cargo_handle {
                         let _ = cargo.kill().await;
                     }
-                    
+
                     // Start new server
                     cargo_handle = Some(start_rust_server(
                         crate_path,
                         args.port,
                         frontend.is_some().then_some(args.internal_frontend_port),
                     ).await?);
-                    
+
                     info!("Rust server restarted");
                 }
             }
@@ -355,11 +358,16 @@ async fn run_file_watcher(
                 // React to create/remove/rename events
                 let should_rebuild = matches!(
                     event.kind,
-                    EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_))
+                    EventKind::Create(_)
+                        | EventKind::Remove(_)
+                        | EventKind::Modify(ModifyKind::Name(_))
                 );
 
                 if should_rebuild && last_rebuild.elapsed() > debounce_duration {
-                    info!("File structure changed ({:?}), updating proxies...", event.kind);
+                    info!(
+                        "File structure changed ({:?}), updating proxies...",
+                        event.kind
+                    );
 
                     // Re-run frontend linking (preserve menus and plugins)
                     if let Err(e) = run_prebuild(
@@ -375,7 +383,7 @@ async fn run_file_watcher(
                         warn!("Failed to update proxies: {}", e);
                     } else {
                         info!("Proxies updated successfully");
-                        
+
                         // Signal main loop to restart Rust server (for public route changes)
                         let _ = restart_tx.send(()).await;
                     }

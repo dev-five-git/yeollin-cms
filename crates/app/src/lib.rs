@@ -36,9 +36,9 @@ pub use yeollin_plugin::PluginMetadata;
 
 // Re-export auth utilities for plugins and apps
 pub use yeollin_auth::{
-    AuthConfig, AuthError, AuthState, Claims, CurrentUser, SuperadminConfig, TokenPair, TokenType,
     auth_middleware, generate_access_token, generate_token, hash_password, verify_password,
-    verify_token,
+    verify_token, AuthConfig, AuthError, AuthState, Claims, CurrentUser, SuperadminConfig,
+    TokenPair, TokenType,
 };
 
 /// Create a new Yeollin application builder

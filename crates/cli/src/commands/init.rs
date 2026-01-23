@@ -70,7 +70,10 @@ pub async fn run(args: InitArgs) -> Result<()> {
     tokio::try_join!(
         fs::write(api_dir.join("Cargo.toml"), &cargo_toml_content),
         fs::write(api_src_dir.join("lib.rs"), &lib_rs_content),
-        fs::write(api_src_dir.join("routes").join("mod.rs"), &routes_mod_content),
+        fs::write(
+            api_src_dir.join("routes").join("mod.rs"),
+            &routes_mod_content
+        ),
         fs::write(
             api_src_dir.join("routes").join("api").join("mod.rs"),
             &routes_api_mod_content

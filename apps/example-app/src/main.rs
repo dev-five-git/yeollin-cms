@@ -30,14 +30,14 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "yeollin-cms-secret-key-change-in-production".to_string());
 
     // Get superadmin credentials from environment
-    let superadmin_username = std::env::var("SUPERADMIN_USERNAME")
-        .unwrap_or_else(|_| "admin".to_string());
-    let superadmin_password = std::env::var("SUPERADMIN_PASSWORD")
-        .unwrap_or_else(|_| "admin".to_string());
+    let superadmin_username =
+        std::env::var("SUPERADMIN_USERNAME").unwrap_or_else(|_| "admin".to_string());
+    let superadmin_password =
+        std::env::var("SUPERADMIN_PASSWORD").unwrap_or_else(|_| "admin".to_string());
 
     // Create auth config
-    let auth_config = AuthConfig::new(jwt_secret)
-        .superadmin(superadmin_username.clone(), superadmin_password);
+    let auth_config =
+        AuthConfig::new(jwt_secret).superadmin(superadmin_username.clone(), superadmin_password);
 
     tracing::info!(username = %superadmin_username, "Superadmin configured");
 

@@ -275,7 +275,7 @@ impl YeollinAppBuilder {
             }
         }
 
-        let state = AppState::new(self.host, self.port, menus.clone());
+        let state = AppState::new(self.host, self.port);
         let shared_menus = SharedMenus(Arc::new(menus.clone()));
         let shared_plugins = SharedPlugins(Arc::new(plugins.clone()));
 
@@ -291,8 +291,14 @@ impl YeollinAppBuilder {
         if let Some(ref auth_config) = self.auth_config {
             let auth_config_arc = Arc::new(auth_config.clone());
             router = router.merge(auth_router(auth_config_arc));
-            tracing::info!("Auth enabled with superadmin: {}", 
-                auth_config.superadmin.as_ref().map(|s| s.username.as_str()).unwrap_or("none"));
+            tracing::info!(
+                "Auth enabled with superadmin: {}",
+                auth_config
+                    .superadmin
+                    .as_ref()
+                    .map(|s| s.username.as_str())
+                    .unwrap_or("none")
+            );
         }
 
         // Add static file serving or dev proxy as fallback
@@ -412,7 +418,11 @@ fn scan_routes(dir: &std::path::Path) -> Vec<String> {
                     }
                 } else if name.starts_with("page.") {
                     // Found a page file - this is a route
-                    let route = if base.is_empty() { "/".to_string() } else { base.to_string() };
+                    let route = if base.is_empty() {
+                        "/".to_string()
+                    } else {
+                        base.to_string()
+                    };
                     if !routes.contains(&route) {
                         routes.push(route);
                     }

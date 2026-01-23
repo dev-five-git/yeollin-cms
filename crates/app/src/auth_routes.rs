@@ -66,7 +66,8 @@ pub async fn login(
             // For superadmin, we compare plain password (in production, should be hashed)
             // But for initial setup, plain comparison is acceptable
             if body.password == superadmin.password {
-                let token_pair = generate_token(&config.0, &body.username, Some("superadmin"), None)?;
+                let token_pair =
+                    generate_token(&config.0, &body.username, Some("superadmin"), None)?;
 
                 return Ok(Json(LoginResponse {
                     access_token: token_pair.access_token,
@@ -126,12 +127,7 @@ pub async fn refresh_token(
     }
 
     // Generate new token pair
-    let token_pair = generate_token(
-        &config.0,
-        &claims.sub,
-        claims.role.as_deref(),
-        claims.data,
-    )?;
+    let token_pair = generate_token(&config.0, &claims.sub, claims.role.as_deref(), claims.data)?;
 
     Ok(Json(LoginResponse {
         access_token: token_pair.access_token,
