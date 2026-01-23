@@ -5,6 +5,7 @@
 mod routes;
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use yeollin::AuthConfig;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,10 +25,27 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(3001);
 
+    // Get JWT secret from environment or use default (CHANGE IN PRODUCTION!)
+    let jwt_secret = std::env::var("JWT_SECRET")
+        .unwrap_or_else(|_| "yeollin-cms-secret-key-change-in-production".to_string());
+
+    // Get superadmin credentials from environment
+    let superadmin_username = std::env::var("SUPERADMIN_USERNAME")
+        .unwrap_or_else(|_| "admin".to_string());
+    let superadmin_password = std::env::var("SUPERADMIN_PASSWORD")
+        .unwrap_or_else(|_| "admin".to_string());
+
+    // Create auth config
+    let auth_config = AuthConfig::new(jwt_secret)
+        .superadmin(superadmin_username.clone(), superadmin_password);
+
+    tracing::info!(username = %superadmin_username, "Superadmin configured");
+
     // Create vespera router with OpenAPI docs
     let app = yeollin::app()
         .host("0.0.0.0")
         .port(port)
+        .with_auth(auth_config)
         .register_plugin(example_plugin::metadata())
         .merge(vespera::vespera!(
             openapi = "openapi.json",

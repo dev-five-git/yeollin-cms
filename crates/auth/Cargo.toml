@@ -1,0 +1,29 @@
+[package]
+name = "yeollin-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Authentication utilities for Yeollin CMS - JWT, password hashing, middleware"
+
+[dependencies]
+# JWT
+jsonwebtoken = { workspace = true }
+
+# Password hashing
+argon2 = { workspace = true }
+rand = { workspace = true }
+
+# Web framework
+axum = { workspace = true }
+tower = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Utils
+thiserror = { workspace = true }
+tracing = { workspace = true }

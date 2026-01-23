@@ -1,14 +1,16 @@
 //! Yeollin application builder
 
+use crate::auth_routes::auth_router;
 use crate::dev_proxy::dev_proxy_router;
 use crate::server::Server;
 use crate::state::AppState;
 use crate::static_files::static_router;
-use axum::{Extension, Json, Router};
+use axum::{middleware, Extension, Json, Router};
 use include_dir::Dir;
 use serde::Serialize;
 use std::sync::Arc;
 use vespera::Schema;
+use yeollin_auth::{auth_middleware, AuthConfig, AuthState};
 use yeollin_core::MenuConfig;
 use yeollin_plugin::PluginMetadata;
 
@@ -98,6 +100,7 @@ pub struct YeollinAppBuilder {
     port: u16,
     static_dir: Option<&'static Dir<'static>>,
     dev_proxy_port: Option<u16>,
+    auth_config: Option<AuthConfig>,
 }
 
 impl YeollinAppBuilder {
@@ -109,6 +112,7 @@ impl YeollinAppBuilder {
             port: 3001,
             static_dir: None,
             dev_proxy_port: None,
+            auth_config: None,
         }
     }
 
@@ -194,6 +198,30 @@ impl YeollinAppBuilder {
         self
     }
 
+    /// Configure authentication
+    ///
+    /// Sets up JWT-based authentication with the provided configuration.
+    /// Includes superadmin credentials for initial setup.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use yeollin_auth::AuthConfig;
+    /// use std::time::Duration;
+    ///
+    /// let app = yeollin::app()
+    ///     .with_auth(
+    ///         AuthConfig::new("your-secret-key")
+    ///             .superadmin("admin", "password")
+    ///             .access_token_expiry(Duration::from_secs(3600))
+    ///     )
+    ///     .build();
+    /// ```
+    pub fn with_auth(mut self, config: AuthConfig) -> Self {
+        self.auth_config = Some(config);
+        self
+    }
+
     /// Build the application
     pub fn build(mut self) -> YeollinApp {
         // Auto-detect dev proxy from environment
@@ -258,6 +286,14 @@ impl YeollinAppBuilder {
             .layer(Extension(shared_menus))
             .layer(Extension(shared_plugins));
 
+        // Add auth routes if auth is configured
+        if let Some(ref auth_config) = self.auth_config {
+            let auth_config_arc = Arc::new(auth_config.clone());
+            router = router.merge(auth_router(auth_config_arc));
+            tracing::info!("Auth enabled with superadmin: {}", 
+                auth_config.superadmin.as_ref().map(|s| s.username.as_str()).unwrap_or("none"));
+        }
+
         // Add static file serving or dev proxy as fallback
         if let Some(dev_proxy_port) = self.dev_proxy_port {
             router = router.merge(dev_proxy_router(dev_proxy_port));
@@ -265,6 +301,14 @@ impl YeollinAppBuilder {
         } else if let Some(static_dir) = self.static_dir {
             router = router.merge(static_router(static_dir));
             tracing::info!("Static file serving enabled");
+        }
+
+        // Apply auth middleware if auth is configured
+        // This wraps all routes including the fallback (dev proxy/static)
+        if let Some(ref auth_config) = self.auth_config {
+            let auth_state = AuthState::new(auth_config.clone());
+            router = router.layer(middleware::from_fn_with_state(auth_state, auth_middleware));
+            tracing::info!("Auth middleware applied");
         }
 
         YeollinApp {

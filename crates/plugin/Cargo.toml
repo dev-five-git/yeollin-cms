@@ -7,6 +7,7 @@ description = "Plugin interface for Yeollin CMS"
 
 [dependencies]
 yeollin-core = { workspace = true }
+yeollin-auth = { workspace = true }
 axum = { workspace = true }
 vespera = { workspace = true }
 serde = { workspace = true }

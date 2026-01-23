@@ -15,6 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 yeollin-core = { workspace = true }
+yeollin-auth = { workspace = true }
 yeollin-plugin = { workspace = true }
 
 # Async runtime
