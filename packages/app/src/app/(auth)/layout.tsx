@@ -1,5 +1,6 @@
 import { Box, Flex } from '@devup-ui/react'
 
+import { Header } from '@/components/layout/Header'
 import { Sidebar } from '@/components/layout/Sidebar'
 
 export default function AuthLayout({
@@ -11,9 +12,12 @@ export default function AuthLayout({
   return (
     <Flex h="100vh">
       <Sidebar />
-      <Box flex={1} overflow="auto" bg="$backgroundSecondary">
-        {children}
-      </Box>
+      <Flex flex={1} flexDirection="column" overflow="hidden">
+        <Header />
+        <Box flex={1} overflow="auto" bg="$backgroundSecondary">
+          {children}
+        </Box>
+      </Flex>
     </Flex>
   )
 }
