@@ -10,6 +10,19 @@
         "typescript": "^5.9",
       },
     },
+    "apps/example-app": {
+      "name": "example-app",
+      "version": "0.1.0",
+      "dependencies": {
+        "@devup-ui/react": "^1.0",
+      },
+      "devDependencies": {
+        "@types/react": "^19",
+        "next": "^16",
+        "react": "^19",
+        "typescript": "^5.9",
+      },
+    },
     "packages/app": {
       "name": "@yeollin/app",
       "version": "0.1.0",
@@ -500,6 +513,8 @@
     "estree-util-visit": ["estree-util-visit@2.0.0", "", { "dependencies": { "@types/estree-jsx": "^1.0.0", "@types/unist": "^3.0.0" } }, "sha512-m5KgiH85xAhhW8Wta0vShLcUvOsh3LLPI2YVwcbio1l7E09NTLL1EyMZFM1OyWowoH0skScNbhOPl4kcBgzTww=="],
 
     "esutils": ["esutils@2.0.3", "", {}, "sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g=="],
+
+    "example-app": ["example-app@workspace:apps/example-app"],
 
     "extend": ["extend@3.0.2", "", {}, "sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g=="],
 

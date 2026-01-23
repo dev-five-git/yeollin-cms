@@ -5,7 +5,8 @@
   "description": "Open, extensible CMS framework inspired by Tauri",
   "workspaces": [
     "packages/*",
-    "plugins/*"
+    "plugins/*",
+    "apps/*"
   ],
   "scripts": {
     "dev": "bun --filter '*' dev",
