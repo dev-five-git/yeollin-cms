@@ -352,6 +352,7 @@ fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
 }
 
 /// Merge dependencies from current directory's package.json into output
+/// Avoids duplicates by checking both dependencies AND devDependencies
 fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
     let output_package = output_dir.join("package.json");
     let app_package = app_dir.join("package.json");
@@ -366,14 +367,27 @@ fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
     let app_content = fs::read_to_string(&app_package)?;
     let app_json: serde_json::Value = serde_json::from_str(&app_content)?;
 
-    // Merge dependencies
+    // Collect all existing package names from both sections to avoid duplicates
+    let existing_deps: std::collections::HashSet<String> = output_json
+        .get("dependencies")
+        .and_then(|d| d.as_object())
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default();
+
+    let existing_dev_deps: std::collections::HashSet<String> = output_json
+        .get("devDependencies")
+        .and_then(|d| d.as_object())
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default();
+
+    // Merge dependencies (skip if already in deps OR devDeps)
     if let Some(deps) = app_json.get("dependencies").and_then(|d| d.as_object()) {
         if let Some(target) = output_json
             .get_mut("dependencies")
             .and_then(|d| d.as_object_mut())
         {
             for (key, value) in deps {
-                if !target.contains_key(key) {
+                if !existing_deps.contains(key) && !existing_dev_deps.contains(key) {
                     debug!("Adding dependency: {} = {}", key, value);
                     target.insert(key.clone(), value.clone());
                 }
@@ -381,14 +395,14 @@ fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
         }
     }
 
-    // Merge devDependencies
+    // Merge devDependencies (skip if already in deps OR devDeps)
     if let Some(deps) = app_json.get("devDependencies").and_then(|d| d.as_object()) {
         if let Some(target) = output_json
             .get_mut("devDependencies")
             .and_then(|d| d.as_object_mut())
         {
             for (key, value) in deps {
-                if !target.contains_key(key) {
+                if !existing_deps.contains(key) && !existing_dev_deps.contains(key) {
                     debug!("Adding devDependency: {} = {}", key, value);
                     target.insert(key.clone(), value.clone());
                 }

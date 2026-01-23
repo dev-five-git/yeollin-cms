@@ -17,6 +17,7 @@
         "@devup-api/fetch": "^0.1.14",
         "@devup-api/react-query": "^0.1.7",
         "@devup-ui/react": "^1.0.32",
+        "@devup-ui/reset-css": "^1.0.21",
         "@tanstack/react-query": "^5.90.19",
         "next": "^16.1.4",
         "react": "^19.2.3",
@@ -35,19 +36,6 @@
     "packages/types": {
       "name": "@yeollin/types",
       "version": "0.1.0",
-    },
-    "plugins/example-app": {
-      "name": "@yeollin-plugin/example-app",
-      "version": "0.1.0",
-      "dependencies": {
-        "@devup-ui/react": "^1.0",
-      },
-      "devDependencies": {
-        "@types/react": "^19",
-        "next": "^16",
-        "react": "^19",
-        "typescript": "^5.9",
-      },
     },
     "plugins/example-plugin": {
       "name": "@yeollin-plugin/example-plugin",
@@ -118,6 +106,8 @@
     "@devup-ui/plugin-utils": ["@devup-ui/plugin-utils@1.0.1", "", {}, "sha512-zIyBAIZQVWiHJ/38Nx/aSN7ebWtb5lEfmJuO9tFEWLzG2WE24vTYBPpo3KXanWZsnWfPV5eNAM4bcYR5+ohWdQ=="],
 
     "@devup-ui/react": ["@devup-ui/react@1.0.32", "", { "dependencies": { "csstype-extra": "latest", "react": "^19.2" } }, "sha512-dzGoUkdwFM8CXJeB6MKhBUboq4Q2xMAQeGoOPX3jyB7eioxl/kUT1QgecU/OVbOxVKQJrGUehTknvna00EtwRA=="],
+
+    "@devup-ui/reset-css": ["@devup-ui/reset-css@1.0.21", "", { "dependencies": { "@devup-ui/react": "^1.0.31" } }, "sha512-D3NOSzO51KHsKLaQZIIQ5o5EK2y0ySsdlVGgJhE5SuoB6nsok12MD1m909eghBhd1FCKV+pxkj+B8/Zg/0LEHA=="],
 
     "@devup-ui/wasm": ["@devup-ui/wasm@1.0.58", "", {}, "sha512-ynFHCy40kn6trSj8SXzlb6mQNYvkdLs7eKPunPnilD7A1FSxlrI1pb4rAWeR/fjLOdeCCk3vpUUTr+aaG+kTQw=="],
 
@@ -318,8 +308,6 @@
     "@typescript-eslint/utils": ["@typescript-eslint/utils@8.53.1", "", { "dependencies": { "@eslint-community/eslint-utils": "^4.9.1", "@typescript-eslint/scope-manager": "8.53.1", "@typescript-eslint/types": "8.53.1", "@typescript-eslint/typescript-estree": "8.53.1" }, "peerDependencies": { "eslint": "^8.57.0 || ^9.0.0", "typescript": ">=4.8.4 <6.0.0" } }, "sha512-c4bMvGVWW4hv6JmDUEG7fSYlWOl3II2I4ylt0NM+seinYQlZMQIaKaXIIVJWt9Ofh6whrpM+EdDQXKXjNovvrg=="],
 
     "@typescript-eslint/visitor-keys": ["@typescript-eslint/visitor-keys@8.53.1", "", { "dependencies": { "@typescript-eslint/types": "8.53.1", "eslint-visitor-keys": "^4.2.1" } }, "sha512-oy+wV7xDKFPRyNggmXuZQSBzvoLnpmJs+GhzRhPjrxl2b/jIlyjVokzm47CZCDUdXKr2zd7ZLodPfOBpOPyPlg=="],
-
-    "@yeollin-plugin/example-app": ["@yeollin-plugin/example-app@workspace:plugins/example-app"],
 
     "@yeollin-plugin/example-plugin": ["@yeollin-plugin/example-plugin@workspace:plugins/example-plugin"],
 
