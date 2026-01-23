@@ -36,7 +36,9 @@ pub async fn list() -> Json<Vec<ExampleItem>> {
 
 /// Get a single item by ID
 #[vespera::route(get, path = "/{id}", tags = ["example"])]
-pub async fn get(Path(id): Path<String>) -> Result<Json<ExampleItem>, vespera::axum::http::StatusCode> {
+pub async fn get(
+    Path(id): Path<String>,
+) -> Result<Json<ExampleItem>, vespera::axum::http::StatusCode> {
     if id == "1" {
         Ok(Json(ExampleItem {
             id: "1".to_string(),

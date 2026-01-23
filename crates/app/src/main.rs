@@ -16,9 +16,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Starting Yeollin CMS");
 
     // Build the application
-    let builder = yeollin::app()
-        .host("0.0.0.0")
-        .port(3001);
+    let builder = yeollin::app().host("0.0.0.0").port(3001);
 
     let app = builder.build();
 

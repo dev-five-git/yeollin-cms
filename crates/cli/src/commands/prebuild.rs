@@ -2,13 +2,13 @@
 //!
 //! Extracts the app template and links frontend assets from current directory.
 
-use std::path::{Path, PathBuf};
-use std::fs;
-use std::process::Stdio;
-use clap::Args;
 use anyhow::{Context, Result};
+use clap::Args;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use tokio::process::Command;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 use crate::template::AppTemplate;
 
@@ -27,7 +27,7 @@ pub struct PrebuildArgs {
 #[derive(Debug)]
 pub struct AppFrontend {
     pub name: String,
-    pub app_path: PathBuf,  // Frontend assets (./app/)
+    pub app_path: PathBuf, // Frontend assets (./app/)
 }
 
 /// Detect app structure in current directory
@@ -35,17 +35,15 @@ pub struct AppFrontend {
 pub fn detect_current_app() -> Option<AppFrontend> {
     let current = std::env::current_dir().ok()?;
     let app_path = current.join("app");
-    
+
     if app_path.exists() && app_path.is_dir() {
-        let name = current.file_name()
+        let name = current
+            .file_name()
             .and_then(|n| n.to_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "app".to_string());
-        
-        Some(AppFrontend {
-            name,
-            app_path,
-        })
+
+        Some(AppFrontend { name, app_path })
     } else {
         None
     }
@@ -55,18 +53,18 @@ pub fn detect_current_app() -> Option<AppFrontend> {
 /// Supports both old structure (api/) and new structure (Cargo.toml at root)
 pub fn detect_crate_dir() -> Option<PathBuf> {
     let current = std::env::current_dir().ok()?;
-    
+
     // New structure: Cargo.toml at root with src/
     if current.join("Cargo.toml").exists() && current.join("src").is_dir() {
         return Some(current);
     }
-    
+
     // Old structure: api/ subdirectory
     let api_dir = current.join("api");
     if api_dir.is_dir() && api_dir.join("Cargo.toml").exists() {
         return Some(api_dir);
     }
-    
+
     None
 }
 
@@ -76,7 +74,8 @@ pub fn get_binary_name(crate_dir: &Path) -> Result<String> {
     if cargo_toml.exists() {
         let content = fs::read_to_string(&cargo_toml)?;
         // Look for [[bin]] name first
-        if let Some(bin_name) = content.lines()
+        if let Some(bin_name) = content
+            .lines()
             .skip_while(|l| !l.contains("[[bin]]"))
             .find(|l| l.trim().starts_with("name"))
             .and_then(|l| l.split('"').nth(1))
@@ -84,7 +83,8 @@ pub fn get_binary_name(crate_dir: &Path) -> Result<String> {
             return Ok(bin_name.to_string());
         }
         // Fall back to package name
-        if let Some(pkg_name) = content.lines()
+        if let Some(pkg_name) = content
+            .lines()
             .find(|l| l.trim().starts_with("name"))
             .and_then(|l| l.split('"').nth(1))
         {
@@ -97,7 +97,7 @@ pub fn get_binary_name(crate_dir: &Path) -> Result<String> {
 /// Find binary path for the crate
 pub fn find_binary_path(crate_dir: &Path) -> Result<std::path::PathBuf> {
     let binary_name = get_binary_name(crate_dir)?;
-    
+
     // Find workspace root to locate target/debug
     let mut workspace_root = crate_dir.to_path_buf();
     while !workspace_root.join("target").exists() {
@@ -107,9 +107,15 @@ pub fn find_binary_path(crate_dir: &Path) -> Result<std::path::PathBuf> {
     }
 
     #[cfg(windows)]
-    let binary_path = workspace_root.join("target").join("debug").join(format!("{}.exe", binary_name));
+    let binary_path = workspace_root
+        .join("target")
+        .join("debug")
+        .join(format!("{}.exe", binary_name));
     #[cfg(not(windows))]
-    let binary_path = workspace_root.join("target").join("debug").join(&binary_name);
+    let binary_path = workspace_root
+        .join("target")
+        .join("debug")
+        .join(&binary_name);
 
     if !binary_path.exists() {
         anyhow::bail!("Binary not found: {}", binary_path.display());
@@ -131,22 +137,31 @@ pub async fn export_from_binary(binary_path: &Path, env_var: &str) -> Result<Str
         .context(format!("Failed to run binary for {} export", env_var))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     // Find JSON array in output
-    let json_start = stdout.rfind("\n[").map(|i| i + 1)
-        .or_else(|| if stdout.starts_with('[') { Some(0) } else { None })
+    let json_start = stdout
+        .rfind("\n[")
+        .map(|i| i + 1)
+        .or_else(|| {
+            if stdout.starts_with('[') {
+                Some(0)
+            } else {
+                None
+            }
+        })
         .unwrap_or(0);
-    
+
     let json_str = &stdout[json_start..];
-    
+
     Ok(json_str.trim().to_string())
 }
 
 pub async fn run(args: PrebuildArgs) -> Result<()> {
     let current_dir = std::env::current_dir()?;
-    let output_dir = args.output_dir
+    let output_dir = args
+        .output_dir
         .unwrap_or_else(|| current_dir.join(".yeollin").join("app"));
-    
+
     // Detect Rust crate (new structure: Cargo.toml at root, or old: api/)
     let crate_dir = detect_crate_dir();
 
@@ -159,7 +174,7 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
 
     // Detect app/ in current directory
     let frontend = detect_current_app();
-    
+
     if let Some(ref app) = frontend {
         info!("Found frontend: {} at {}", app.name, app.app_path.display());
     } else {
@@ -185,7 +200,7 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
     // Export menus and plugins from binary
     let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
         let binary_path = find_binary_path(crate_path)?;
-        
+
         info!("Exporting menus from binary...");
         let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {
             Ok(m) => {
@@ -215,12 +230,19 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
         (None, None)
     };
 
-    run_prebuild(&output_dir, frontend.as_ref(), menus_json.as_deref(), plugins_json.as_deref(), args.force).await
+    run_prebuild(
+        &output_dir,
+        frontend.as_ref(),
+        menus_json.as_deref(),
+        plugins_json.as_deref(),
+        args.force,
+    )
+    .await
 }
 
 /// Run prebuild with optional frontend, menus, and plugins
 pub async fn run_prebuild(
-    output_dir: &Path, 
+    output_dir: &Path,
     frontend: Option<&AppFrontend>,
     menus_json: Option<&str>,
     plugins_json: Option<&str>,
@@ -228,13 +250,13 @@ pub async fn run_prebuild(
 ) -> Result<()> {
     // 1. Prepare output directory
     prepare_output_dir(output_dir, force)?;
-    
+
     // 2. Create .gitignore in .yeollin/ directory
     if let Some(yeollin_dir) = output_dir.parent() {
         let gitignore_path = yeollin_dir.join(".gitignore");
         fs::write(&gitignore_path, "*\n")?;
     }
-    
+
     // 3. Extract embedded template
     AppTemplate::extract_to(output_dir)?;
     info!("Extracted app template to {}", output_dir.display());
@@ -248,7 +270,7 @@ pub async fn run_prebuild(
         merge_dependencies(output_dir, &current_dir)?;
         info!("Merged dependencies");
 
-        link_frontend(output_dir, app, true)?;  // Always copy for now (Turbopack compatibility)
+        link_frontend(output_dir, app, true)?; // Always copy for now (Turbopack compatibility)
         info!("Linked frontend");
     }
 
@@ -266,7 +288,7 @@ pub async fn run_prebuild(
 /// Copy openapi.json from api/ directory to output if it exists
 fn copy_openapi_json(current_dir: &Path, output_dir: &Path) -> Result<()> {
     let api_openapi = current_dir.join("api").join("openapi.json");
-    
+
     if api_openapi.exists() {
         let dest = output_dir.join("openapi.json");
         fs::copy(&api_openapi, &dest)?;
@@ -285,7 +307,7 @@ fn copy_openapi_json(current_dir: &Path, output_dir: &Path) -> Result<()> {
         fs::write(&dest, serde_json::to_string_pretty(&placeholder)?)?;
         debug!("Created placeholder openapi.json");
     }
-    
+
     Ok(())
 }
 
@@ -293,8 +315,9 @@ fn copy_openapi_json(current_dir: &Path, output_dir: &Path) -> Result<()> {
 fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
     if output_dir.exists() {
         if force {
-            fs::remove_dir_all(output_dir)
-                .with_context(|| format!("Failed to remove existing output: {}", output_dir.display()))?;
+            fs::remove_dir_all(output_dir).with_context(|| {
+                format!("Failed to remove existing output: {}", output_dir.display())
+            })?;
         } else {
             // Clean only the app symlink directory, keep rest
             let app_link_dir = output_dir.join("src").join("app").join("(app)");
@@ -303,10 +326,14 @@ fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
             }
         }
     }
-    
-    fs::create_dir_all(output_dir)
-        .with_context(|| format!("Failed to create output directory: {}", output_dir.display()))?;
-    
+
+    fs::create_dir_all(output_dir).with_context(|| {
+        format!(
+            "Failed to create output directory: {}",
+            output_dir.display()
+        )
+    })?;
+
     Ok(())
 }
 
@@ -314,7 +341,7 @@ fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
 fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
     let output_package = output_dir.join("package.json");
     let app_package = app_dir.join("package.json");
-    
+
     if !output_package.exists() || !app_package.exists() {
         return Ok(());
     }
@@ -327,7 +354,10 @@ fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
 
     // Merge dependencies
     if let Some(deps) = app_json.get("dependencies").and_then(|d| d.as_object()) {
-        if let Some(target) = output_json.get_mut("dependencies").and_then(|d| d.as_object_mut()) {
+        if let Some(target) = output_json
+            .get_mut("dependencies")
+            .and_then(|d| d.as_object_mut())
+        {
             for (key, value) in deps {
                 if !target.contains_key(key) {
                     debug!("Adding dependency: {} = {}", key, value);
@@ -339,7 +369,10 @@ fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
 
     // Merge devDependencies
     if let Some(deps) = app_json.get("devDependencies").and_then(|d| d.as_object()) {
-        if let Some(target) = output_json.get_mut("devDependencies").and_then(|d| d.as_object_mut()) {
+        if let Some(target) = output_json
+            .get_mut("devDependencies")
+            .and_then(|d| d.as_object_mut())
+        {
             for (key, value) in deps {
                 if !target.contains_key(key) {
                     debug!("Adding devDependency: {} = {}", key, value);
@@ -362,7 +395,7 @@ fn link_frontend(output_dir: &Path, frontend: &AppFrontend, copy_mode: bool) -> 
     fs::create_dir_all(&app_dir)?;
 
     let link_path = app_dir.join(&frontend.name);
-    
+
     if copy_mode {
         copy_dir_recursive(&frontend.app_path, &link_path)?;
         debug!("Copied frontend to {}", link_path.display());
@@ -371,7 +404,7 @@ fn link_frontend(output_dir: &Path, frontend: &AppFrontend, copy_mode: bool) -> 
         {
             std::os::unix::fs::symlink(&frontend.app_path, &link_path)?;
         }
-        
+
         #[cfg(windows)]
         {
             if std::os::windows::fs::symlink_dir(&frontend.app_path, &link_path).is_err() {
@@ -388,12 +421,12 @@ fn link_frontend(output_dir: &Path, frontend: &AppFrontend, copy_mode: bool) -> 
 /// Transforms MenuConfig[] to MenuItem[] for frontend consumption
 fn write_menus(output_dir: &Path, menus_json: Option<&str>) -> Result<()> {
     let menus_path = output_dir.join("src").join("menus.json");
-    
+
     let content = if let Some(json_str) = menus_json {
         // Parse the MenuConfig[] from binary export
-        let menu_configs: Vec<serde_json::Value> = serde_json::from_str(json_str)
-            .unwrap_or_default();
-        
+        let menu_configs: Vec<serde_json::Value> =
+            serde_json::from_str(json_str).unwrap_or_default();
+
         // Flatten: extract all items from each MenuConfig
         let menu_items: Vec<serde_json::Value> = menu_configs
             .into_iter()
@@ -401,13 +434,12 @@ fn write_menus(output_dir: &Path, menus_json: Option<&str>) -> Result<()> {
             .filter_map(|items| items.as_array().cloned())
             .flatten()
             .collect();
-        
-        serde_json::to_string_pretty(&menu_items)
-            .unwrap_or_else(|_| "[]".to_string())
+
+        serde_json::to_string_pretty(&menu_items).unwrap_or_else(|_| "[]".to_string())
     } else {
         "[]".to_string()
     };
-    
+
     fs::write(&menus_path, content)?;
     info!("Wrote menus.json");
     Ok(())
@@ -429,8 +461,7 @@ fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Resul
         return Ok(());
     };
 
-    let plugins: Vec<serde_json::Value> = serde_json::from_str(json_str)
-        .unwrap_or_default();
+    let plugins: Vec<serde_json::Value> = serde_json::from_str(json_str).unwrap_or_default();
 
     for plugin in plugins {
         let Some(name) = plugin.get("name").and_then(|v| v.as_str()) else {
@@ -448,12 +479,12 @@ fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Resul
 
         // Destination: .yeollin/app/src/app/(app)/<plugin-name>/
         let dest_base = output_dir.join("src").join("app").join("(app)").join(name);
-        
+
         // Scan for route groups (folders starting with parentheses) and copy their contents
         for entry in fs::read_dir(frontend_dir)? {
             let entry = entry?;
             let entry_path = entry.path();
-            
+
             if !entry_path.is_dir() {
                 continue;
             }
@@ -496,18 +527,18 @@ fn copy_route_group_contents(src: &Path, dst: &Path) -> Result<()> {
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
-    
+
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
-        
+
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
             fs::copy(&src_path, &dst_path)?;
         }
     }
-    
+
     Ok(())
 }

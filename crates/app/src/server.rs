@@ -1,9 +1,9 @@
 //! HTTP server
 
+use crate::state::AppState;
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use crate::state::AppState;
 
 pub struct Server {
     router: Router,
@@ -17,14 +17,12 @@ impl Server {
 
     pub async fn run(self) -> anyhow::Result<()> {
         // Add middleware
-        let router = self.router
-            .layer(TraceLayer::new_for_http())
-            .layer(
-                CorsLayer::new()
-                    .allow_origin(Any)
-                    .allow_methods(Any)
-                    .allow_headers(Any),
-            );
+        let router = self.router.layer(TraceLayer::new_for_http()).layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        );
 
         let addr = self.state.addr();
         tracing::info!("Starting Yeollin CMS server on {}", addr);

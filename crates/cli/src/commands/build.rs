@@ -3,13 +3,15 @@
 //! Runs prebuild, then builds Next.js for static export and Rust binary.
 //! Expects to be run from a directory containing api/ and/or app/ subdirectories.
 
-use std::process::Stdio;
-use clap::Args;
 use anyhow::{Context, Result};
+use clap::Args;
+use std::process::Stdio;
 use tokio::process::Command;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
-use super::prebuild::{detect_current_app, detect_crate_dir, run_prebuild, find_binary_path, export_from_binary};
+use super::prebuild::{
+    detect_crate_dir, detect_current_app, export_from_binary, find_binary_path, run_prebuild,
+};
 
 #[derive(Args)]
 pub struct BuildArgs {
@@ -34,7 +36,7 @@ pub async fn run(args: BuildArgs) -> Result<()> {
     let current_dir = std::env::current_dir()?;
     let crate_dir = detect_crate_dir();
     let frontend = detect_current_app();
-    
+
     info!("Build starting...");
     info!("  Current dir: {}", current_dir.display());
     info!("  Has crate:   {}", crate_dir.is_some());
@@ -65,7 +67,7 @@ pub async fn run(args: BuildArgs) -> Result<()> {
     // 2. Export menus and plugins from binary (after build)
     let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
         let binary_path = find_binary_path(crate_path)?;
-        
+
         info!("Exporting menus from binary...");
         let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {
             Ok(m) => {
@@ -98,7 +100,14 @@ pub async fn run(args: BuildArgs) -> Result<()> {
     // 3. Run prebuild if not skipped and we have frontend
     if !args.skip_prebuild && frontend.is_some() {
         info!("Running prebuild...");
-        run_prebuild(&yeollin_app_dir, frontend.as_ref(), menus_json.as_deref(), plugins_json.as_deref(), true).await?;
+        run_prebuild(
+            &yeollin_app_dir,
+            frontend.as_ref(),
+            menus_json.as_deref(),
+            plugins_json.as_deref(),
+            true,
+        )
+        .await?;
     }
 
     // 4. Install dependencies and build frontend
@@ -112,7 +121,7 @@ pub async fn run(args: BuildArgs) -> Result<()> {
             .status()
             .await
             .context("Failed to run bun install")?;
-        
+
         if !install_status.success() {
             anyhow::bail!("bun install failed");
         }
@@ -131,7 +140,10 @@ pub async fn run(args: BuildArgs) -> Result<()> {
             anyhow::bail!("Next.js build failed");
         }
 
-        info!("Frontend build complete: {}", yeollin_app_dir.join("out").display());
+        info!(
+            "Frontend build complete: {}",
+            yeollin_app_dir.join("out").display()
+        );
     }
 
     // 5. Build Rust binary in release mode

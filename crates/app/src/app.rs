@@ -1,16 +1,16 @@
 //! Yeollin application builder
 
-use std::sync::Arc;
+use crate::dev_proxy::dev_proxy_router;
+use crate::server::Server;
+use crate::state::AppState;
+use crate::static_files::static_router;
 use axum::{Extension, Json, Router};
 use include_dir::Dir;
 use serde::Serialize;
+use std::sync::Arc;
 use vespera::Schema;
 use yeollin_core::MenuConfig;
 use yeollin_plugin::PluginMetadata;
-use crate::state::AppState;
-use crate::server::Server;
-use crate::static_files::static_router;
-use crate::dev_proxy::dev_proxy_router;
 
 /// Shared menus for Extension layer
 #[derive(Clone)]
@@ -49,7 +49,7 @@ pub struct YeollinApp {
 
 impl YeollinApp {
     /// Run the CMS server
-    /// 
+    ///
     /// If YEOLLIN_EXPORT_MENUS env var is set, exports menus as JSON and exits
     /// If YEOLLIN_EXPORT_PLUGINS env var is set, exports plugin info as JSON and exits
     pub async fn run(self) -> anyhow::Result<()> {
@@ -124,9 +124,9 @@ impl YeollinAppBuilder {
     }
 
     /// Merge an external router (e.g., vespera-generated routes)
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```rust,ignore
     /// let vespera_router = vespera::vespera!(
     ///     openapi = "openapi.json",
@@ -134,7 +134,7 @@ impl YeollinAppBuilder {
     ///     version = "1.0.0",
     ///     docs_url = "/docs"
     /// );
-    /// 
+    ///
     /// let app = yeollin::app()
     ///     .merge(vespera_router)
     ///     .build();
@@ -157,17 +157,17 @@ impl YeollinAppBuilder {
     }
 
     /// Set the static files directory (embedded Next.js output)
-    /// 
+    ///
     /// When set, the server will serve static files from this directory
     /// as a fallback for routes not matched by API endpoints.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```rust,ignore
     /// use include_dir::{include_dir, Dir};
-    /// 
+    ///
     /// static STATIC_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../.yeollin/app/out");
-    /// 
+    ///
     /// let app = yeollin::app()
     ///     .with_static(&STATIC_DIR)
     ///     .build();
@@ -178,12 +178,12 @@ impl YeollinAppBuilder {
     }
 
     /// Set the dev proxy port (for development mode)
-    /// 
+    ///
     /// When set, the server will proxy non-API requests to the Next.js dev server
     /// running on the specified port. This is mutually exclusive with `with_static`.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```rust,ignore
     /// let app = yeollin::app()
     ///     .with_dev_proxy(3000)  // Proxy to Next.js dev server on port 3000
@@ -287,25 +287,25 @@ pub async fn health_check() -> Json<HealthResponse> {
 
 /// Get all registered menus
 #[vespera::route(get, path = "/api/menus", tags = ["system"])]
-pub async fn get_menus(
-    Extension(menus): Extension<SharedMenus>,
-) -> Json<Vec<MenuConfig>> {
+pub async fn get_menus(Extension(menus): Extension<SharedMenus>) -> Json<Vec<MenuConfig>> {
     Json((*menus.0).clone())
 }
 
 /// Get all registered plugins
 #[vespera::route(get, path = "/api/plugins", tags = ["system"])]
-pub async fn get_plugins(
-    Extension(plugins): Extension<SharedPlugins>,
-) -> Json<Vec<PluginInfo>> {
+pub async fn get_plugins(Extension(plugins): Extension<SharedPlugins>) -> Json<Vec<PluginInfo>> {
     // Return plugins without frontend_path (internal info)
-    let public_plugins: Vec<PluginInfo> = plugins.0.iter().map(|p| PluginInfo {
-        name: p.name.clone(),
-        version: p.version.clone(),
-        author: p.author.clone(),
-        description: p.description.clone(),
-        license: p.license.clone(),
-        frontend_path: None,
-    }).collect();
+    let public_plugins: Vec<PluginInfo> = plugins
+        .0
+        .iter()
+        .map(|p| PluginInfo {
+            name: p.name.clone(),
+            version: p.version.clone(),
+            author: p.author.clone(),
+            description: p.description.clone(),
+            license: p.license.clone(),
+            frontend_path: None,
+        })
+        .collect();
     Json(public_plugins)
 }

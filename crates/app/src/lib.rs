@@ -24,10 +24,10 @@ mod state;
 mod static_files;
 
 pub use app::*;
+pub use dev_proxy::dev_proxy_router;
+pub use static_files::static_router;
 pub use yeollin_core::*;
 pub use yeollin_plugin::PluginMetadata;
-pub use static_files::static_router;
-pub use dev_proxy::dev_proxy_router;
 
 /// Create a new Yeollin application builder
 pub fn app() -> YeollinAppBuilder {

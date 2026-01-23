@@ -2,10 +2,10 @@
 //!
 //! Creates a new Yeollin plugin with both API and frontend scaffolding.
 
-use std::path::PathBuf;
-use std::fs;
-use clap::Args;
 use anyhow::Result;
+use clap::Args;
+use std::fs;
+use std::path::PathBuf;
 use tracing::info;
 
 #[derive(Args)]
@@ -27,11 +27,15 @@ pub struct InitArgs {
 }
 
 pub async fn run(args: InitArgs) -> Result<()> {
-    let project_dir = args.project_dir
+    let project_dir = args
+        .project_dir
         .unwrap_or_else(|| std::env::current_dir().expect("Failed to get current directory"));
-    
+
     let plugin_name = sanitize_name(&args.name);
-    let app_name = args.app_name.map(|n| sanitize_name(&n)).unwrap_or_else(|| plugin_name.clone());
+    let app_name = args
+        .app_name
+        .map(|n| sanitize_name(&n))
+        .unwrap_or_else(|| plugin_name.clone());
     let plugin_dir = project_dir.join("plugins").join(&plugin_name);
 
     if plugin_dir.exists() {
@@ -61,7 +65,11 @@ pub async fn run(args: InitArgs) -> Result<()> {
     generate_package_json(&plugin_dir, &app_name)?;
     generate_app_page_tsx(&app_plugin_dir, &plugin_name)?;
 
-    info!("Plugin '{}' created at {}", plugin_name, plugin_dir.display());
+    info!(
+        "Plugin '{}' created at {}",
+        plugin_name,
+        plugin_dir.display()
+    );
     if app_name != plugin_name {
         info!("  Crate name: {}", app_name);
         info!("  Package name: @yeollin-plugin/{}", app_name);
@@ -72,7 +80,10 @@ pub async fn run(args: InitArgs) -> Result<()> {
     info!("     members = [..., \"plugins/{}/api\"]", plugin_name);
     info!("");
     info!("  2. Register in your app's main.rs:");
-    info!("     .register_plugin({}::metadata())", app_name.replace('-', "_"));
+    info!(
+        "     .register_plugin({}::metadata())",
+        app_name.replace('-', "_")
+    );
     info!("");
     info!("  3. Start development:");
     info!("     cd plugins/{} && bun run dev", plugin_name);
@@ -112,7 +123,8 @@ fn to_pascal_case(name: &str) -> String {
 // ============================================================================
 
 fn generate_api_cargo_toml(api_dir: &PathBuf, name: &str, description: &str) -> Result<()> {
-    let content = format!(r#"[package]
+    let content = format!(
+        r#"[package]
 name = "{name}"
 version = "0.1.0"
 edition = "2021"
@@ -126,14 +138,16 @@ yeollin-plugin = {{ workspace = true }}
 vespera = {{ workspace = true }}
 serde = {{ workspace = true }}
 serde_json = {{ workspace = true }}
-"#);
-    
+"#
+    );
+
     fs::write(api_dir.join("Cargo.toml"), content)?;
     Ok(())
 }
 
 fn generate_api_lib_rs(src_dir: &PathBuf, name: &str, description: &str) -> Result<()> {
-    let content = format!(r#"//! {description}
+    let content = format!(
+        r#"//! {description}
 
 mod routes;
 
@@ -141,8 +155,9 @@ yeollin_plugin::yeollin_plugin! {{
     name: "{name}",
     description: "{description}",
 }}
-"#);
-    
+"#
+    );
+
     fs::write(src_dir.join("lib.rs"), content)?;
     Ok(())
 }
@@ -152,25 +167,28 @@ fn generate_api_routes_mod(src_dir: &PathBuf) -> Result<()> {
 
 pub mod api;
 "#;
-    
+
     fs::write(src_dir.join("routes").join("mod.rs"), content)?;
     Ok(())
 }
 
 fn generate_api_routes_api_mod(api_dir: &PathBuf, name: &str) -> Result<()> {
     let rust_name = to_rust_ident(name);
-    let content = format!(r#"//! API routes
+    let content = format!(
+        r#"//! API routes
 
 pub mod {rust_name};
-"#);
-    
+"#
+    );
+
     fs::write(api_dir.join("mod.rs"), content)?;
     Ok(())
 }
 
 fn generate_api_routes_plugin_mod(plugin_routes_dir: &PathBuf, name: &str) -> Result<()> {
     let pascal_name = to_pascal_case(name);
-    let content = format!(r#"//! /{name} API routes
+    let content = format!(
+        r#"//! /{name} API routes
 
 use serde::{{Deserialize, Serialize}};
 use vespera::axum::Json;
@@ -216,8 +234,9 @@ pub async fn get(
         Err(vespera::axum::http::StatusCode::NOT_FOUND)
     }}
 }}
-"#);
-    
+"#
+    );
+
     fs::write(plugin_routes_dir.join("mod.rs"), content)?;
     Ok(())
 }
@@ -227,7 +246,8 @@ pub async fn get(
 // ============================================================================
 
 fn generate_package_json(plugin_dir: &PathBuf, name: &str) -> Result<()> {
-    let content = format!(r#"{{
+    let content = format!(
+        r#"{{
   "name": "@yeollin-plugin/{name}",
   "version": "0.1.0",
   "private": true,
@@ -236,15 +256,17 @@ fn generate_package_json(plugin_dir: &PathBuf, name: &str) -> Result<()> {
     "build": "cargo run -p yeollin-cli -- build"
   }}
 }}
-"#);
-    
+"#
+    );
+
     fs::write(plugin_dir.join("package.json"), content)?;
     Ok(())
 }
 
 fn generate_app_page_tsx(plugin_app_dir: &PathBuf, name: &str) -> Result<()> {
     let pascal_name = to_pascal_case(name);
-    let content = format!(r#""use client";
+    let content = format!(
+        r#""use client";
 
 import {{ Box, Flex, Text }} from "@devup-ui/react";
 
@@ -267,8 +289,9 @@ export default function {pascal_name}Page() {{
     </Box>
   );
 }}
-"#);
-    
+"#
+    );
+
     fs::write(plugin_app_dir.join("page.tsx"), content)?;
     Ok(())
 }

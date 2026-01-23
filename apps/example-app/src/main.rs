@@ -25,19 +25,17 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(3001);
 
     // Create vespera router with OpenAPI docs
-    let vespera_router = vespera::vespera!(
-        openapi = "openapi.json",
-        title = "Example CMS API",
-        version = "1.0.0",
-        docs_url = "/docs",
-        redoc_url = "/redoc"
-    );
-
     let app = yeollin::app()
         .host("0.0.0.0")
         .port(port)
-        .merge(vespera_router)
         .register_plugin(example_plugin::metadata())
+        .merge(vespera::vespera!(
+            openapi = "openapi.json",
+            title = "Example CMS API",
+            version = "1.0.0",
+            docs_url = "/docs",
+            redoc_url = "/redoc"
+        ))
         .build();
 
     tracing::info!(menus = %app.export_menus_json(), "Registered menus");

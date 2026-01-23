@@ -3,13 +3,15 @@
 //! Runs prebuild, then starts Next.js dev server and Rust API server.
 //! Expects to be run from a directory containing api/ and/or app/ subdirectories.
 
-use std::process::Stdio;
-use clap::Args;
 use anyhow::{Context, Result};
+use clap::Args;
+use std::process::Stdio;
 use tokio::process::Command;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
-use super::prebuild::{detect_current_app, detect_crate_dir, run_prebuild, find_binary_path, export_from_binary};
+use super::prebuild::{
+    detect_crate_dir, detect_current_app, export_from_binary, find_binary_path, run_prebuild,
+};
 
 #[derive(Args)]
 pub struct DevArgs {
@@ -30,7 +32,7 @@ pub async fn run(args: DevArgs) -> Result<()> {
     let current_dir = std::env::current_dir()?;
     let crate_dir = detect_crate_dir();
     let frontend = detect_current_app();
-    
+
     info!("Development server starting...");
     info!("  Current dir: {}", current_dir.display());
     info!("  Has crate:   {}", crate_dir.is_some());
@@ -59,7 +61,7 @@ pub async fn run(args: DevArgs) -> Result<()> {
     // 2. Export menus and plugins from binary (after build)
     let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
         let binary_path = find_binary_path(crate_path)?;
-        
+
         info!("Exporting menus from binary...");
         let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {
             Ok(m) => {
@@ -91,10 +93,17 @@ pub async fn run(args: DevArgs) -> Result<()> {
 
     // 3. Run prebuild if not skipped and we have frontend
     let yeollin_app_dir = current_dir.join(".yeollin").join("app");
-    
+
     if !args.skip_prebuild && frontend.is_some() {
         info!("Running prebuild...");
-        run_prebuild(&yeollin_app_dir, frontend.as_ref(), menus_json.as_deref(), plugins_json.as_deref(), false).await?;
+        run_prebuild(
+            &yeollin_app_dir,
+            frontend.as_ref(),
+            menus_json.as_deref(),
+            plugins_json.as_deref(),
+            false,
+        )
+        .await?;
     }
 
     // 4. Install frontend dependencies if needed
@@ -108,7 +117,7 @@ pub async fn run(args: DevArgs) -> Result<()> {
             .status()
             .await
             .context("Failed to run bun install")?;
-        
+
         if !install_status.success() {
             anyhow::bail!("bun install failed");
         }
@@ -117,7 +126,10 @@ pub async fn run(args: DevArgs) -> Result<()> {
     info!("Starting development server (single port mode)...");
     info!("  API:      http://localhost:{}", args.port);
     if frontend.is_some() {
-        info!("  Frontend: proxied from internal port {}", args.internal_frontend_port);
+        info!(
+            "  Frontend: proxied from internal port {}",
+            args.internal_frontend_port
+        );
     }
 
     // 5. Start Next.js dev server if we have frontend
@@ -125,7 +137,12 @@ pub async fn run(args: DevArgs) -> Result<()> {
         let mut next_cmd = Command::new("bun");
         next_cmd
             .current_dir(&yeollin_app_dir)
-            .args(["run", "dev", "--port", &args.internal_frontend_port.to_string()])
+            .args([
+                "run",
+                "dev",
+                "--port",
+                &args.internal_frontend_port.to_string(),
+            ])
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .kill_on_drop(true);
@@ -148,17 +165,17 @@ pub async fn run(args: DevArgs) -> Result<()> {
             .current_dir(crate_path)
             .args(["run"])
             .env("PORT", args.port.to_string());
-        
+
         // Enable dev proxy if we have frontend
         if frontend.is_some() {
             cargo_cmd.env("YEOLLIN_DEV_PROXY", args.internal_frontend_port.to_string());
         }
-        
+
         cargo_cmd
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .kill_on_drop(true);
-        
+
         Some(cargo_cmd.spawn()?)
     } else {
         None
