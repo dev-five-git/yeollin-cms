@@ -2,16 +2,22 @@
 //!
 //! Runs prebuild (proxy mode), then starts Next.js dev server and Rust API server.
 //! Proxy mode creates re-export files that import from the original source,
-//! enabling instant HMR without needing a file watcher.
+//! enabling instant HMR. A file watcher detects new/deleted files and updates proxies,
+//! and restarts the Rust server to pick up new public routes.
 
 use anyhow::{Context, Result};
 use clap::Args;
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind};
+use std::path::PathBuf;
 use std::process::Stdio;
-use tokio::process::Command;
-use tracing::{debug, info};
+use std::sync::mpsc;
+use tokio::process::{Child, Command};
+use tokio::sync::mpsc as tokio_mpsc;
+use tracing::{debug, info, warn};
 
 use super::prebuild::{
     detect_crate_dir, detect_current_app, export_from_binary, find_binary_path, run_prebuild,
+    AppFrontend,
 };
 
 #[derive(Args)]
@@ -182,60 +188,206 @@ pub async fn run(args: DevArgs) -> Result<()> {
 
     // 6. Start API server
     let mut cargo_handle = if let Some(ref crate_path) = crate_dir {
-        let mut cargo_cmd = Command::new("cargo");
-        cargo_cmd
-            .current_dir(crate_path)
-            .args(["run"])
-            .env("PORT", args.port.to_string());
-
-        // Enable dev proxy if we have frontend
-        if frontend.is_some() {
-            cargo_cmd.env("YEOLLIN_DEV_PROXY", args.internal_frontend_port.to_string());
-        }
-
-        cargo_cmd
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .kill_on_drop(true);
-
-        Some(cargo_cmd.spawn()?)
+        Some(start_rust_server(
+            crate_path,
+            args.port,
+            frontend.is_some().then_some(args.internal_frontend_port),
+        ).await?)
     } else {
         None
     };
 
     info!("Development server started. Press Ctrl+C to stop.");
 
-    // Wait for processes to exit
-    match (next_handle.as_mut(), cargo_handle.as_mut()) {
-        (Some(next), Some(cargo)) => {
-            tokio::select! {
-                result = next.wait() => {
-                    if let Ok(status) = result {
-                        if !status.success() {
-                            tracing::error!("Next.js dev server exited with status: {}", status);
-                        }
+    // 7. Start file watcher for proxy mode (with restart channel)
+    let (restart_tx, mut restart_rx) = tokio_mpsc::channel::<()>(1);
+    
+    let watcher_handle = if !args.copy_mode && frontend.is_some() {
+        let frontend_clone = frontend.clone().unwrap();
+        let yeollin_app_dir_clone = yeollin_app_dir.clone();
+        let plugins_json_clone = plugins_json.clone();
+
+        Some(tokio::spawn(async move {
+            if let Err(e) = run_file_watcher(
+                frontend_clone,
+                yeollin_app_dir_clone,
+                plugins_json_clone,
+                restart_tx,
+            )
+            .await
+            {
+                warn!("File watcher error: {}", e);
+            }
+        }))
+    } else {
+        None
+    };
+
+    // Main event loop - handle process exits and restart signals
+    loop {
+        tokio::select! {
+            // Handle Next.js exit
+            result = async { 
+                match next_handle.as_mut() {
+                    Some(h) => Some(h.wait().await),
+                    None => std::future::pending().await,
+                }
+            } => {
+                if let Some(Ok(status)) = result {
+                    if !status.success() {
+                        tracing::error!("Next.js dev server exited with status: {}", status);
                     }
+                }
+                if let Some(ref mut cargo) = cargo_handle {
                     let _ = cargo.kill().await;
                 }
-                result = cargo.wait() => {
-                    if let Ok(status) = result {
-                        if !status.success() {
-                            tracing::error!("API server exited with status: {}", status);
-                        }
+                break;
+            }
+            
+            // Handle Rust server exit (without restart signal = real exit)
+            result = async {
+                match cargo_handle.as_mut() {
+                    Some(h) => Some(h.wait().await),
+                    None => std::future::pending().await,
+                }
+            } => {
+                if let Some(Ok(status)) = result {
+                    if !status.success() {
+                        tracing::error!("API server exited with status: {}", status);
                     }
+                }
+                if let Some(ref mut next) = next_handle {
                     let _ = next.kill().await;
+                }
+                break;
+            }
+            
+            // Handle restart signal from file watcher
+            _ = restart_rx.recv() => {
+                if let Some(ref crate_path) = crate_dir {
+                    info!("Restarting Rust server to pick up route changes...");
+                    
+                    // Kill current server
+                    if let Some(ref mut cargo) = cargo_handle {
+                        let _ = cargo.kill().await;
+                    }
+                    
+                    // Start new server
+                    cargo_handle = Some(start_rust_server(
+                        crate_path,
+                        args.port,
+                        frontend.is_some().then_some(args.internal_frontend_port),
+                    ).await?);
+                    
+                    info!("Rust server restarted");
                 }
             }
         }
-        (Some(next), None) => {
-            let _ = next.wait().await;
-        }
-        (None, Some(cargo)) => {
-            let _ = cargo.wait().await;
-        }
-        (None, None) => {}
+    }
+
+    // Abort watcher if running
+    if let Some(handle) = watcher_handle {
+        handle.abort();
     }
 
     info!("Development server stopped.");
+    Ok(())
+}
+
+/// Start the Rust API server
+async fn start_rust_server(
+    crate_path: &PathBuf,
+    port: u16,
+    frontend_port: Option<u16>,
+) -> Result<Child> {
+    let mut cargo_cmd = Command::new("cargo");
+    cargo_cmd
+        .current_dir(crate_path)
+        .args(["run"])
+        .env("PORT", port.to_string());
+
+    // Enable dev proxy if we have frontend
+    if let Some(frontend_port) = frontend_port {
+        cargo_cmd.env("YEOLLIN_DEV_PROXY", frontend_port.to_string());
+    }
+
+    cargo_cmd
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true);
+
+    Ok(cargo_cmd.spawn()?)
+}
+
+/// Watch app/ directory for file structure changes and update proxy files
+async fn run_file_watcher(
+    frontend: AppFrontend,
+    output_dir: PathBuf,
+    plugins_json: Option<String>,
+    restart_tx: tokio_mpsc::Sender<()>,
+) -> Result<()> {
+    let (tx, rx) = mpsc::channel();
+
+    let mut watcher: RecommendedWatcher =
+        notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
+            if let Ok(event) = res {
+                let _ = tx.send(event);
+            }
+        })?;
+
+    // Watch the app/ directory
+    watcher.watch(&frontend.app_path, RecursiveMode::Recursive)?;
+    info!(
+        "Watching {} for file changes...",
+        frontend.app_path.display()
+    );
+
+    // Process events with debouncing
+    let mut last_rebuild = std::time::Instant::now();
+    let debounce_duration = std::time::Duration::from_millis(500);
+
+    loop {
+        match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+            Ok(event) => {
+                // React to create/remove/rename events
+                let should_rebuild = matches!(
+                    event.kind,
+                    EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_))
+                );
+
+                if should_rebuild && last_rebuild.elapsed() > debounce_duration {
+                    info!("File structure changed ({:?}), updating proxies...", event.kind);
+
+                    // Re-run frontend linking
+                    if let Err(e) = run_prebuild(
+                        &output_dir,
+                        Some(&frontend),
+                        None, // menus don't change
+                        plugins_json.as_deref(),
+                        false,
+                        true, // use_proxy
+                    )
+                    .await
+                    {
+                        warn!("Failed to update proxies: {}", e);
+                    } else {
+                        info!("Proxies updated successfully");
+                        
+                        // Signal main loop to restart Rust server (for public route changes)
+                        let _ = restart_tx.send(()).await;
+                    }
+
+                    last_rebuild = std::time::Instant::now();
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Continue waiting
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                break;
+            }
+        }
+    }
+
     Ok(())
 }

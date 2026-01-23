@@ -20,6 +20,7 @@ tokio = { workspace = true }
 include_dir = { workspace = true }
 async-walkdir = { workspace = true }
 futures-util = { workspace = true }
+notify = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
