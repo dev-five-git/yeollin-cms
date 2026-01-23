@@ -281,7 +281,7 @@ pub async fn run_prebuild(
     let current_dir = std::env::current_dir()?;
     copy_openapi_json(&current_dir, output_dir).await?;
 
-    // 5. If frontend exists, merge dependencies and link
+    // 5. If frontend exists, merge dependencies, link, and collect public routes
     if let Some(app) = frontend {
         merge_dependencies(output_dir, &current_dir).await?;
         info!("Merged dependencies");
@@ -308,12 +308,8 @@ pub async fn run_prebuild(
     menus_result?;
     plugins_result?;
 
-    // 7. Copy plugin frontend files (goes under (auth)/)
-    let has_plugins = if use_proxy {
-        link_plugin_frontends_proxy(output_dir, plugins_json).await?
-    } else {
-        copy_plugin_frontends(output_dir, plugins_json).await?
-    };
+    // 7. Copy plugin frontend files (always copy, no proxy for plugins)
+    let has_plugins = copy_plugin_frontends(output_dir, plugins_json).await?;
 
     // 8. Ensure (auth)/layout.tsx exists if plugins were copied
     if has_plugins {
@@ -776,108 +772,7 @@ async fn write_plugins(output_dir: &Path, plugins_json: Option<&str>) -> Result<
     Ok(())
 }
 
-/// Link plugin frontend files using PROXY mode
-async fn link_plugin_frontends_proxy(output_dir: &Path, plugins_json: Option<&str>) -> Result<bool> {
-    let Some(json_str) = plugins_json else {
-        return Ok(false);
-    };
-
-    let plugins: Vec<serde_json::Value> = serde_json::from_str(json_str).unwrap_or_default();
-    let mut linked_any = false;
-
-    for plugin in plugins {
-        let Some(name) = plugin.get("name").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let Some(frontend_path) = plugin.get("frontend_path").and_then(|v| v.as_str()) else {
-            continue;
-        };
-
-        let frontend_dir = Path::new(frontend_path);
-        if !frontend_dir.exists() || !frontend_dir.is_dir() {
-            debug!("Plugin {} frontend path not found: {}", name, frontend_path);
-            continue;
-        }
-
-        let dest_base = output_dir
-            .join("src")
-            .join("app")
-            .join("(auth)")
-            .join(name);
-
-        let mut entries = fs::read_dir(frontend_dir).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let entry_path = entry.path();
-
-            if !entry_path.is_dir() {
-                continue;
-            }
-
-            let dir_name = entry.file_name();
-            let dir_name_str = dir_name.to_str().unwrap_or("");
-
-            if dir_name_str.starts_with('(') && dir_name_str.ends_with(')') {
-                link_plugin_dir_proxy(&entry_path, &dest_base, frontend_path).await?;
-                info!("Linked plugin frontend (proxy): {} from {}", name, dir_name_str);
-                linked_any = true;
-            }
-        }
-    }
-
-    Ok(linked_any)
-}
-
-/// Recursively link a plugin directory using proxy mode
-async fn link_plugin_dir_proxy(src: &Path, dst: &Path, plugin_root: &str) -> Result<()> {
-    fs::create_dir_all(dst).await?;
-
-    let mut entries = fs::read_dir(src).await?;
-    while let Some(entry) = entries.next_entry().await? {
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if src_path.is_dir() {
-            Box::pin(link_plugin_dir_proxy(&src_path, &dst_path, plugin_root)).await?;
-        } else {
-            let extension = src_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            match extension {
-                "tsx" | "ts" | "jsx" | "js" => {
-                    // Create proxy file
-                    let rel_to_plugin = src_path
-                        .strip_prefix(Path::new(plugin_root).parent().unwrap_or(Path::new(".")))
-                        .unwrap_or(&src_path);
-                    let depth = dst_path
-                        .parent()
-                        .unwrap()
-                        .strip_prefix(std::env::current_dir().unwrap().join(".yeollin"))
-                        .map(|p| p.components().count())
-                        .unwrap_or(5);
-
-                    let up_path = "../".repeat(depth + 1);
-                    let import_path = rel_to_plugin.with_extension("");
-                    let import_path_str = import_path.to_string_lossy().replace('\\', "/");
-
-                    let content = if extension == "tsx" || extension == "jsx" {
-                        format!(
-                            "export {{ default }} from \"{up_path}{import_path_str}\";\nexport * from \"{up_path}{import_path_str}\";\n"
-                        )
-                    } else {
-                        format!("export * from \"{up_path}{import_path_str}\";\n")
-                    };
-
-                    fs::write(&dst_path, content).await?;
-                }
-                _ => {
-                    fs::copy(&src_path, &dst_path).await?;
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Copy plugin frontend files (copy mode)
+/// Copy plugin frontend files
 async fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Result<bool> {
     let Some(json_str) = plugins_json else {
         return Ok(false);

@@ -201,7 +201,8 @@ impl YeollinAppBuilder {
     /// Configure authentication
     ///
     /// Sets up JWT-based authentication with the provided configuration.
-    /// Includes superadmin credentials for initial setup.
+    /// Public routes are automatically detected from the `(public)` directory
+    /// during prebuild (stored in `.yeollin/app/src/public-routes.json`).
     ///
     /// # Example
     ///
@@ -305,7 +306,24 @@ impl YeollinAppBuilder {
 
         // Apply auth middleware if auth is configured
         // This wraps all routes including the fallback (dev proxy/static)
-        if let Some(ref auth_config) = self.auth_config {
+        if let Some(ref mut auth_config) = self.auth_config {
+            // Auto-detect public routes by scanning (public) directory
+            let public_dir = std::path::Path::new(".yeollin/app/src/app/(public)");
+            if public_dir.exists() {
+                let routes = scan_public_routes(public_dir);
+                for route in &routes {
+                    if !auth_config.public_routes.contains(route) {
+                        auth_config.public_routes.push(route.clone());
+                    }
+                }
+                if !routes.is_empty() {
+                    tracing::info!(
+                        "Auto-detected {} public routes from (public) directory",
+                        routes.len()
+                    );
+                }
+            }
+
             let auth_state = AuthState::new(auth_config.clone());
             router = router.layer(middleware::from_fn_with_state(auth_state, auth_middleware));
             tracing::info!("Auth middleware applied");
@@ -352,4 +370,39 @@ pub async fn get_plugins(Extension(plugins): Extension<SharedPlugins>) -> Json<V
         })
         .collect();
     Json(public_plugins)
+}
+
+/// Scan (public) directory to find public routes
+fn scan_public_routes(public_dir: &std::path::Path) -> Vec<String> {
+    let mut routes = Vec::new();
+
+    fn scan_dir(dir: &std::path::Path, base: &str, routes: &mut Vec<String>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+
+                if path.is_dir() {
+                    // Skip layout files, recurse into subdirs
+                    if !name.starts_with('_') {
+                        let new_base = if base.is_empty() {
+                            format!("/{}", name)
+                        } else {
+                            format!("{}/{}", base, name)
+                        };
+                        scan_dir(&path, &new_base, routes);
+                    }
+                } else if name.starts_with("page.") {
+                    // Found a page file - this is a route
+                    let route = if base.is_empty() { "/".to_string() } else { base.to_string() };
+                    if !routes.contains(&route) {
+                        routes.push(route);
+                    }
+                }
+            }
+        }
+    }
+
+    scan_dir(public_dir, "", &mut routes);
+    routes
 }

@@ -42,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(username = %superadmin_username, "Superadmin configured");
 
     // Create vespera router with OpenAPI docs
+    // Public routes under (public) directory are auto-detected from prebuild
     let app = yeollin::app()
         .host("0.0.0.0")
         .port(port)

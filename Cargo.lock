@@ -3182,6 +3182,7 @@ dependencies = [
  "anyhow",
  "async-walkdir",
  "clap",
+ "dunce",
  "futures-util",
  "include_dir",
  "serde",
