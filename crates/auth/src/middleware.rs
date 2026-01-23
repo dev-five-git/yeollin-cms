@@ -47,7 +47,10 @@ impl From<Claims> for CurrentUser {
 }
 
 /// Auth middleware function
-/// Checks JWT token and redirects to signin if invalid
+/// Checks JWT token and handles routing based on authentication state:
+/// - Public routes: Always accessible
+/// - Guest routes: Only accessible when NOT logged in (redirects to dashboard if logged in)
+/// - Protected routes: Requires valid token (redirects to signin if not logged in)
 ///
 /// Usage:
 /// ```rust,ignore
@@ -66,34 +69,40 @@ pub async fn auth_middleware(
 ) -> Response {
     let path = request.uri().path().to_string();
 
-    // Check if path is public
-    if state.config.is_public_route(&path) {
-        return next.run(request).await;
-    }
-
     // Static assets don't need auth
     if path.starts_with("/_next/") || path.starts_with("/static/") || path.ends_with(".ico") {
         return next.run(request).await;
     }
 
-    // Try to extract token from Authorization header or cookie
+    // Check if path is public (accessible regardless of auth status)
+    if state.config.is_public_route(&path) {
+        return next.run(request).await;
+    }
+
+    // Try to extract and verify token
     let token = extract_token(&request);
+    let valid_user = token.and_then(|t| {
+        verify_token(&state.config, &t)
+            .ok()
+            .filter(|claims| claims.is_access_token())
+            .map(CurrentUser::from)
+    });
 
-    match token {
-        Some(token) => {
-            match verify_token(&state.config, &token) {
-                Ok(claims) => {
-                    // Only accept access tokens for API requests
-                    if !claims.is_access_token() {
-                        return unauthorized_response(&state.config, &path);
-                    }
+    // Check if path is guest route (only accessible when NOT logged in)
+    if state.config.is_guest_route(&path) {
+        if valid_user.is_some() {
+            // User is logged in, redirect to dashboard
+            return guest_redirect(&state.config, &path);
+        }
+        // User is not logged in, allow access to guest route
+        return next.run(request).await;
+    }
 
-                    // Add user info to request extensions
-                    request.extensions_mut().insert(CurrentUser::from(claims));
-                    next.run(request).await
-                }
-                Err(_) => unauthorized_response(&state.config, &path),
-            }
+    // Protected route - require valid token
+    match valid_user {
+        Some(user) => {
+            request.extensions_mut().insert(user);
+            next.run(request).await
         }
         None => unauthorized_response(&state.config, &path),
     }
@@ -138,5 +147,22 @@ fn unauthorized_response(config: &AuthConfig, path: &str) -> Response {
             .into_response()
     } else {
         Redirect::temporary(&config.signin_redirect).into_response()
+    }
+}
+
+/// Return redirect to dashboard for logged-in users on guest routes
+fn guest_redirect(config: &AuthConfig, path: &str) -> Response {
+    if path.starts_with("/api/") {
+        // For API routes, return 403 Forbidden (authenticated but not allowed)
+        (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({
+                "error": "Already authenticated",
+                "code": "ALREADY_AUTHENTICATED"
+            })),
+        )
+            .into_response()
+    } else {
+        Redirect::temporary(&config.dashboard_redirect).into_response()
     }
 }

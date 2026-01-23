@@ -310,7 +310,7 @@ impl YeollinAppBuilder {
             // Auto-detect public routes by scanning (public) directory
             let public_dir = std::path::Path::new(".yeollin/app/src/app/(public)");
             if public_dir.exists() {
-                let routes = scan_public_routes(public_dir);
+                let routes = scan_routes(public_dir);
                 for route in &routes {
                     if !auth_config.public_routes.contains(route) {
                         auth_config.public_routes.push(route.clone());
@@ -319,6 +319,23 @@ impl YeollinAppBuilder {
                 if !routes.is_empty() {
                     tracing::info!(
                         "Auto-detected {} public routes from (public) directory",
+                        routes.len()
+                    );
+                }
+            }
+
+            // Auto-detect guest routes by scanning (guest) directory
+            let guest_dir = std::path::Path::new(".yeollin/app/src/app/(guest)");
+            if guest_dir.exists() {
+                let routes = scan_routes(guest_dir);
+                for route in &routes {
+                    if !auth_config.guest_routes.contains(route) {
+                        auth_config.guest_routes.push(route.clone());
+                    }
+                }
+                if !routes.is_empty() {
+                    tracing::info!(
+                        "Auto-detected {} guest routes from (guest) directory",
                         routes.len()
                     );
                 }
@@ -372,8 +389,9 @@ pub async fn get_plugins(Extension(plugins): Extension<SharedPlugins>) -> Json<V
     Json(public_plugins)
 }
 
-/// Scan (public) directory to find public routes
-fn scan_public_routes(public_dir: &std::path::Path) -> Vec<String> {
+/// Scan a route group directory to find routes
+/// Works for (public), (guest), or any other route group
+fn scan_routes(dir: &std::path::Path) -> Vec<String> {
     let mut routes = Vec::new();
 
     fn scan_dir(dir: &std::path::Path, base: &str, routes: &mut Vec<String>) {
@@ -403,6 +421,6 @@ fn scan_public_routes(public_dir: &std::path::Path) -> Vec<String> {
         }
     }
 
-    scan_dir(public_dir, "", &mut routes);
+    scan_dir(dir, "", &mut routes);
     routes
 }

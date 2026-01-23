@@ -20,8 +20,14 @@ pub struct AuthConfig {
     /// Public routes that don't require authentication
     pub public_routes: Vec<String>,
 
+    /// Guest routes - accessible only when NOT logged in (redirect to dashboard if logged in)
+    pub guest_routes: Vec<String>,
+
     /// Default redirect path when unauthenticated (default: /signin)
     pub signin_redirect: String,
+
+    /// Default redirect path for logged-in users on guest routes (default: /)
+    pub dashboard_redirect: String,
 }
 
 impl Default for AuthConfig {
@@ -32,12 +38,13 @@ impl Default for AuthConfig {
             refresh_token_expiry: Duration::from_secs(60 * 60 * 24 * 7), // 7 days
             superadmin: None,
             public_routes: vec![
-                "/signin".to_string(),
                 "/api/auth/login".to_string(),
                 "/api/auth/refresh".to_string(),
                 "/health".to_string(),
             ],
+            guest_routes: vec!["/signin".to_string()],
             signin_redirect: "/signin".to_string(),
+            dashboard_redirect: "/".to_string(),
         }
     }
 }
@@ -78,15 +85,32 @@ impl AuthConfig {
         self
     }
 
+    /// Add a guest route (only accessible when NOT logged in)
+    pub fn guest_route(mut self, route: impl Into<String>) -> Self {
+        self.guest_routes.push(route.into());
+        self
+    }
+
     /// Set signin redirect path
     pub fn signin_redirect(mut self, path: impl Into<String>) -> Self {
         self.signin_redirect = path.into();
         self
     }
 
+    /// Set dashboard redirect path (for logged-in users on guest routes)
+    pub fn dashboard_redirect(mut self, path: impl Into<String>) -> Self {
+        self.dashboard_redirect = path.into();
+        self
+    }
+
     /// Check if a path is a public route
     pub fn is_public_route(&self, path: &str) -> bool {
         self.public_routes.iter().any(|r| path.starts_with(r))
+    }
+
+    /// Check if a path is a guest route (only for non-authenticated users)
+    pub fn is_guest_route(&self, path: &str) -> bool {
+        self.guest_routes.iter().any(|r| path.starts_with(r))
     }
 }
 
