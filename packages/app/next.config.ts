@@ -1,6 +1,7 @@
 import devupApi from '@devup-api/next-plugin'
 import { DevupUI } from '@devup-ui/next-plugin'
 import type { NextConfig } from 'next'
+import path from 'path'
 
 const nextConfig: NextConfig = {
   // Enable React strict mode
@@ -9,10 +10,11 @@ const nextConfig: NextConfig = {
   // Static export for embedding in Rust binary
   output: 'export',
 
-  // Set turbopack root to this directory (avoid lockfile confusion)
-  turbopack: {
-    root: __dirname,
-  },
+  // Set turbopack root to parent of .yeollin/ to allow importing from app/ directory
+  // This enables proxy mode where we re-export from source files for instant HMR
+  // turbopack: {
+  //   root: path.resolve(__dirname, '..', '..'),
+  // },
   reactCompiler: true,
 }
 

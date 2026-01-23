@@ -18,11 +18,8 @@ tokio = { workspace = true }
 
 # File system
 include_dir = { workspace = true }
-walkdir = { workspace = true }
 async-walkdir = { workspace = true }
 futures-util = { workspace = true }
-fs_extra = { workspace = true }
-notify-debouncer-mini = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

@@ -105,7 +105,8 @@ pub async fn run(args: BuildArgs) -> Result<()> {
             frontend.as_ref(),
             menus_json.as_deref(),
             plugins_json.as_deref(),
-            true,
+            true,  // copy_mode
+            false, // use_proxy - always false for production build
         )
         .await?;
     }

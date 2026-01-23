@@ -23,10 +23,15 @@ pub struct PrebuildArgs {
     /// Force overwrite existing output
     #[arg(short, long)]
     pub force: bool,
+
+    /// Use proxy mode (re-export from source instead of copying)
+    /// This enables instant HMR in dev mode
+    #[arg(long)]
+    pub proxy: bool,
 }
 
 /// App info discovered from current directory
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AppFrontend {
     pub name: String,
     pub app_path: PathBuf, // Frontend assets (./app/)
@@ -170,6 +175,7 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
     info!("Prebuild starting...");
     info!("  Current dir: {}", current_dir.display());
     info!("  Output:      {}", output_dir.display());
+    info!("  Mode:        {}", if args.proxy { "proxy" } else { "copy" });
     if let Some(ref dir) = crate_dir {
         info!("  Crate:       {}", dir.display());
     }
@@ -244,6 +250,7 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
         menus_json.as_deref(),
         plugins_json.as_deref(),
         args.force,
+        args.proxy,
     )
     .await
 }
@@ -255,6 +262,7 @@ pub async fn run_prebuild(
     menus_json: Option<&str>,
     plugins_json: Option<&str>,
     force: bool,
+    use_proxy: bool,
 ) -> Result<()> {
     // 1. Prepare output directory
     prepare_output_dir(output_dir, force).await?;
@@ -278,8 +286,13 @@ pub async fn run_prebuild(
         merge_dependencies(output_dir, &current_dir).await?;
         info!("Merged dependencies");
 
-        link_frontend(output_dir, app, true).await?; // Always copy for now (Turbopack compatibility)
-        info!("Linked frontend");
+        if use_proxy {
+            link_frontend_proxy(output_dir, app).await?;
+            info!("Linked frontend (proxy mode - instant HMR)");
+        } else {
+            link_frontend_copy(output_dir, app).await?;
+            info!("Linked frontend (copy mode)");
+        }
     }
 
     // 6. Write menus.json and plugins.json IN PARALLEL
@@ -296,10 +309,13 @@ pub async fn run_prebuild(
     plugins_result?;
 
     // 7. Copy plugin frontend files (goes under (auth)/)
-    let has_plugins = copy_plugin_frontends(output_dir, plugins_json).await?;
+    let has_plugins = if use_proxy {
+        link_plugin_frontends_proxy(output_dir, plugins_json).await?
+    } else {
+        copy_plugin_frontends(output_dir, plugins_json).await?
+    };
 
     // 8. Ensure (auth)/layout.tsx exists if plugins were copied
-    // Template should already have it, but generate if missing
     if has_plugins {
         let auth_dir = output_dir.join("src").join("app").join("(auth)");
         let auth_layout = auth_dir.join("layout.tsx");
@@ -376,7 +392,6 @@ async fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
 }
 
 /// Merge dependencies from current directory's package.json into output
-/// Avoids duplicates by checking both dependencies AND devDependencies
 async fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
     let output_package = output_dir.join("package.json");
     let app_package = app_dir.join("package.json");
@@ -409,7 +424,7 @@ async fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
         .map(|obj| obj.keys().cloned().collect())
         .unwrap_or_default();
 
-    // Merge dependencies (skip if already in deps OR devDeps)
+    // Merge dependencies
     if let Some(deps) = app_json.get("dependencies").and_then(|d| d.as_object()) {
         if let Some(target) = output_json
             .get_mut("dependencies")
@@ -424,7 +439,7 @@ async fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
         }
     }
 
-    // Merge devDependencies (skip if already in deps OR devDeps)
+    // Merge devDependencies
     if let Some(deps) = app_json.get("devDependencies").and_then(|d| d.as_object()) {
         if let Some(target) = output_json
             .get_mut("devDependencies")
@@ -445,17 +460,154 @@ async fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Link or copy frontend directory into the app
-/// Separates routes into (public)/ and (auth)/ based on (public) marker in source path
-/// Uses parallel file copying for better performance
-async fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bool) -> Result<()> {
+/// Link frontend using PROXY mode - creates re-export files that import from source
+/// This enables instant HMR since Next.js watches the original source files
+async fn link_frontend_proxy(output_dir: &Path, frontend: &AppFrontend) -> Result<()> {
     let public_dir = output_dir.join("src").join("app").join("(public)");
     let auth_dir = output_dir.join("src").join("app").join("(auth)");
 
     let mut has_public_routes = false;
     let mut has_auth_routes = false;
 
-    // Collect all files to copy first
+    // Collect all files
+    let mut files_to_proxy: Vec<(PathBuf, PathBuf, PathBuf, bool)> = Vec::new(); // (src, dest, rel_for_import, is_public)
+
+    let mut walker = WalkDir::new(&frontend.app_path);
+    while let Some(entry) = walker.next().await {
+        let entry: DirEntry = entry?;
+        let src_path = entry.path();
+
+        if src_path.is_dir() {
+            continue;
+        }
+
+        let rel_path = src_path
+            .strip_prefix(&frontend.app_path)
+            .unwrap_or(&src_path);
+        let rel_str = rel_path.to_string_lossy();
+        let is_public = rel_str.contains("(public)");
+        let clean_path = strip_route_groups(rel_path);
+
+        let dest_path = if is_public {
+            has_public_routes = true;
+            public_dir.join(&clean_path)
+        } else {
+            has_auth_routes = true;
+            auth_dir.join(&clean_path)
+        };
+
+        files_to_proxy.push((
+            src_path.to_path_buf(),
+            dest_path,
+            rel_path.to_path_buf(),
+            is_public,
+        ));
+    }
+
+    // Create all parent directories first
+    let mut dirs_to_create: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    for (_, dest_path, _, _) in &files_to_proxy {
+        if let Some(parent) = dest_path.parent() {
+            dirs_to_create.insert(parent.to_path_buf());
+        }
+    }
+    for dir in dirs_to_create {
+        fs::create_dir_all(&dir).await?;
+    }
+
+    // Create proxy files IN PARALLEL
+    let mut futures = FuturesUnordered::new();
+
+    for (src_path, dest_path, rel_path, is_public) in files_to_proxy {
+        let future = async move {
+            let extension = dest_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+            match extension {
+                // TypeScript/JavaScript files - create re-export proxy
+                "tsx" | "ts" | "jsx" | "js" => {
+                    // Calculate relative path from dest to source
+                    // dest: .yeollin/app/src/app/(public)/signin/page.tsx
+                    // src:  app/(public)/signin/page.tsx
+                    // We need: ../../../../../../app/(public)/signin/page
+
+                    let dest_dir = dest_path.parent().unwrap();
+                    let depth = dest_dir
+                        .strip_prefix(std::env::current_dir().unwrap().join(".yeollin"))
+                        .map(|p| p.components().count())
+                        .unwrap_or(5);
+
+                    let up_path = "../".repeat(depth + 1); // +1 for .yeollin itself
+
+                    // Remove extension for import
+                    let import_path = rel_path.with_extension("");
+                    let import_path_str = import_path.to_string_lossy().replace('\\', "/");
+
+                    let content = if extension == "tsx" || extension == "jsx" {
+                        // For React components, re-export default and named exports
+                        format!(
+                            "export {{ default }} from \"{up_path}app/{import_path_str}\";\nexport * from \"{up_path}app/{import_path_str}\";\n"
+                        )
+                    } else {
+                        // For plain TS/JS, just re-export everything
+                        format!("export * from \"{up_path}app/{import_path_str}\";\n")
+                    };
+
+                    fs::write(&dest_path, content).await?;
+                    debug!(
+                        "Proxy {} -> {} ({})",
+                        rel_path.display(),
+                        dest_path.display(),
+                        if is_public { "public" } else { "auth" }
+                    );
+                }
+                // Non-JS files (CSS, images, etc.) - copy directly
+                _ => {
+                    fs::copy(&src_path, &dest_path).await?;
+                    debug!(
+                        "Copied {} -> {} ({})",
+                        rel_path.display(),
+                        dest_path.display(),
+                        if is_public { "public" } else { "auth" }
+                    );
+                }
+            }
+
+            Ok::<_, anyhow::Error>(())
+        };
+        futures.push(future);
+    }
+
+    while let Some(result) = futures.next().await {
+        result?;
+    }
+
+    // Generate layout files if needed
+    if has_public_routes {
+        let public_layout = public_dir.join("layout.tsx");
+        if !public_layout.exists() {
+            generate_public_layout(&public_dir).await?;
+            info!("Generated (public)/layout.tsx");
+        }
+    }
+    if has_auth_routes {
+        let auth_layout = auth_dir.join("layout.tsx");
+        if !auth_layout.exists() {
+            generate_auth_layout(&auth_dir).await?;
+            info!("Generated (auth)/layout.tsx");
+        }
+    }
+
+    Ok(())
+}
+
+/// Link frontend using COPY mode - copies files directly
+async fn link_frontend_copy(output_dir: &Path, frontend: &AppFrontend) -> Result<()> {
+    let public_dir = output_dir.join("src").join("app").join("(public)");
+    let auth_dir = output_dir.join("src").join("app").join("(auth)");
+
+    let mut has_public_routes = false;
+    let mut has_auth_routes = false;
+
     let mut files_to_copy: Vec<(PathBuf, PathBuf, bool)> = Vec::new();
 
     let mut walker = WalkDir::new(&frontend.app_path);
@@ -485,7 +637,7 @@ async fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bo
         files_to_copy.push((src_path.to_path_buf(), dest_path, is_public));
     }
 
-    // Create all parent directories first (sequential to avoid race conditions)
+    // Create directories
     let mut dirs_to_create: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
     for (_, dest_path, _) in &files_to_copy {
         if let Some(parent) = dest_path.parent() {
@@ -496,7 +648,7 @@ async fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bo
         fs::create_dir_all(&dir).await?;
     }
 
-    // Copy files IN PARALLEL (batch of concurrent copies)
+    // Copy files IN PARALLEL
     const PARALLEL_COPIES: usize = 32;
     let mut futures = FuturesUnordered::new();
 
@@ -513,7 +665,6 @@ async fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bo
         };
         futures.push(future);
 
-        // Process in batches to avoid overwhelming the system
         if futures.len() >= PARALLEL_COPIES {
             if let Some(result) = futures.next().await {
                 result?;
@@ -521,12 +672,11 @@ async fn link_frontend(output_dir: &Path, frontend: &AppFrontend, _copy_mode: bo
         }
     }
 
-    // Drain remaining futures
     while let Some(result) = futures.next().await {
         result?;
     }
 
-    // Generate layout files only if they don't already exist
+    // Generate layout files
     if has_public_routes {
         let public_layout = public_dir.join("layout.tsx");
         if !public_layout.exists() {
@@ -626,8 +776,108 @@ async fn write_plugins(output_dir: &Path, plugins_json: Option<&str>) -> Result<
     Ok(())
 }
 
-/// Copy plugin frontend files into the output directory
-/// Uses parallel copying for better performance
+/// Link plugin frontend files using PROXY mode
+async fn link_plugin_frontends_proxy(output_dir: &Path, plugins_json: Option<&str>) -> Result<bool> {
+    let Some(json_str) = plugins_json else {
+        return Ok(false);
+    };
+
+    let plugins: Vec<serde_json::Value> = serde_json::from_str(json_str).unwrap_or_default();
+    let mut linked_any = false;
+
+    for plugin in plugins {
+        let Some(name) = plugin.get("name").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(frontend_path) = plugin.get("frontend_path").and_then(|v| v.as_str()) else {
+            continue;
+        };
+
+        let frontend_dir = Path::new(frontend_path);
+        if !frontend_dir.exists() || !frontend_dir.is_dir() {
+            debug!("Plugin {} frontend path not found: {}", name, frontend_path);
+            continue;
+        }
+
+        let dest_base = output_dir
+            .join("src")
+            .join("app")
+            .join("(auth)")
+            .join(name);
+
+        let mut entries = fs::read_dir(frontend_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let entry_path = entry.path();
+
+            if !entry_path.is_dir() {
+                continue;
+            }
+
+            let dir_name = entry.file_name();
+            let dir_name_str = dir_name.to_str().unwrap_or("");
+
+            if dir_name_str.starts_with('(') && dir_name_str.ends_with(')') {
+                link_plugin_dir_proxy(&entry_path, &dest_base, frontend_path).await?;
+                info!("Linked plugin frontend (proxy): {} from {}", name, dir_name_str);
+                linked_any = true;
+            }
+        }
+    }
+
+    Ok(linked_any)
+}
+
+/// Recursively link a plugin directory using proxy mode
+async fn link_plugin_dir_proxy(src: &Path, dst: &Path, plugin_root: &str) -> Result<()> {
+    fs::create_dir_all(dst).await?;
+
+    let mut entries = fs::read_dir(src).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            Box::pin(link_plugin_dir_proxy(&src_path, &dst_path, plugin_root)).await?;
+        } else {
+            let extension = src_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            match extension {
+                "tsx" | "ts" | "jsx" | "js" => {
+                    // Create proxy file
+                    let rel_to_plugin = src_path
+                        .strip_prefix(Path::new(plugin_root).parent().unwrap_or(Path::new(".")))
+                        .unwrap_or(&src_path);
+                    let depth = dst_path
+                        .parent()
+                        .unwrap()
+                        .strip_prefix(std::env::current_dir().unwrap().join(".yeollin"))
+                        .map(|p| p.components().count())
+                        .unwrap_or(5);
+
+                    let up_path = "../".repeat(depth + 1);
+                    let import_path = rel_to_plugin.with_extension("");
+                    let import_path_str = import_path.to_string_lossy().replace('\\', "/");
+
+                    let content = if extension == "tsx" || extension == "jsx" {
+                        format!(
+                            "export {{ default }} from \"{up_path}{import_path_str}\";\nexport * from \"{up_path}{import_path_str}\";\n"
+                        )
+                    } else {
+                        format!("export * from \"{up_path}{import_path_str}\";\n")
+                    };
+
+                    fs::write(&dst_path, content).await?;
+                }
+                _ => {
+                    fs::copy(&src_path, &dst_path).await?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Copy plugin frontend files (copy mode)
 async fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Result<bool> {
     let Some(json_str) = plugins_json else {
         return Ok(false);
@@ -682,7 +932,6 @@ async fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) ->
 async fn copy_dir_contents_parallel(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst).await?;
 
-    // Collect all files and directories first
     let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut dirs: Vec<(PathBuf, PathBuf)> = Vec::new();
 
@@ -737,7 +986,6 @@ async fn copy_dir_recursive_parallel(src: PathBuf, dst: PathBuf) -> Result<()> {
         }
     }
 
-    // Copy files in parallel
     let mut futures = FuturesUnordered::new();
     for (src_path, dst_path) in files {
         futures.push(async move { fs::copy(&src_path, &dst_path).await });
@@ -746,7 +994,6 @@ async fn copy_dir_recursive_parallel(src: PathBuf, dst: PathBuf) -> Result<()> {
         result?;
     }
 
-    // Recurse into directories in parallel
     let mut dir_futures = FuturesUnordered::new();
     for (src_path, dst_path) in dirs {
         dir_futures.push(copy_dir_recursive_parallel(src_path, dst_path));
