@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use tokio::process::Command;
 use tracing::{info, debug};
 
-use super::prebuild::{detect_current_app, run_prebuild, find_binary_path, export_from_binary};
+use super::prebuild::{detect_current_app, detect_crate_dir, run_prebuild, find_binary_path, export_from_binary};
 
 #[derive(Args)]
 pub struct BuildArgs {
@@ -32,26 +32,25 @@ pub struct BuildArgs {
 
 pub async fn run(args: BuildArgs) -> Result<()> {
     let current_dir = std::env::current_dir()?;
-    let api_dir = current_dir.join("api");
-    let has_api = api_dir.is_dir();
+    let crate_dir = detect_crate_dir();
     let frontend = detect_current_app();
     
     info!("Build starting...");
     info!("  Current dir: {}", current_dir.display());
-    info!("  Has api/:    {}", has_api);
+    info!("  Has crate:   {}", crate_dir.is_some());
     info!("  Has app/:    {}", frontend.is_some());
 
-    if !has_api && frontend.is_none() {
-        anyhow::bail!("No api/ or app/ directory found. Run from an app directory.");
+    if crate_dir.is_none() && frontend.is_none() {
+        anyhow::bail!("No Cargo.toml or app/ directory found. Run from an app/plugin directory.");
     }
 
     let yeollin_app_dir = current_dir.join(".yeollin").join("app");
 
-    // 1. Build API first (debug mode for menu export)
-    if has_api {
-        info!("Building API (debug)...");
+    // 1. Build crate first (debug mode for menu export)
+    if let Some(ref crate_path) = crate_dir {
+        info!("Building crate (debug)...");
         let build_status = Command::new("cargo")
-            .current_dir(&api_dir)
+            .current_dir(crate_path)
             .args(["build"])
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -59,13 +58,13 @@ pub async fn run(args: BuildArgs) -> Result<()> {
             .await?;
 
         if !build_status.success() {
-            anyhow::bail!("Failed to build API");
+            anyhow::bail!("Failed to build crate");
         }
     }
 
     // 2. Export menus and plugins from binary (after build)
-    let (menus_json, plugins_json) = if has_api {
-        let binary_path = find_binary_path(&api_dir)?;
+    let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
+        let binary_path = find_binary_path(crate_path)?;
         
         info!("Exporting menus from binary...");
         let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {
@@ -136,29 +135,31 @@ pub async fn run(args: BuildArgs) -> Result<()> {
     }
 
     // 5. Build Rust binary in release mode
-    if !args.skip_backend && has_api {
-        info!("Building backend (Rust release)...");
+    if !args.skip_backend {
+        if let Some(ref crate_path) = crate_dir {
+            info!("Building backend (Rust release)...");
 
-        let mut cargo_args = vec!["build"];
-        if args.release {
-            cargo_args.push("--release");
+            let mut cargo_args = vec!["build"];
+            if args.release {
+                cargo_args.push("--release");
+            }
+
+            let status = Command::new("cargo")
+                .current_dir(crate_path)
+                .args(&cargo_args)
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status()
+                .await
+                .context("Failed to run cargo build")?;
+
+            if !status.success() {
+                anyhow::bail!("Cargo build failed");
+            }
+
+            let profile = if args.release { "release" } else { "debug" };
+            info!("Backend build complete: target/{}/", profile);
         }
-
-        let status = Command::new("cargo")
-            .current_dir(&api_dir)
-            .args(&cargo_args)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .await
-            .context("Failed to run cargo build")?;
-
-        if !status.success() {
-            anyhow::bail!("Cargo build failed");
-        }
-
-        let profile = if args.release { "release" } else { "debug" };
-        info!("Backend build complete: target/{}/", profile);
     }
 
     info!("Build complete!");

@@ -51,9 +51,28 @@ pub fn detect_current_app() -> Option<AppFrontend> {
     }
 }
 
-/// Get binary name from api/ directory's Cargo.toml
-pub fn get_binary_name(api_dir: &Path) -> Result<String> {
-    let cargo_toml = api_dir.join("Cargo.toml");
+/// Detect if current directory is a Rust crate
+/// Supports both old structure (api/) and new structure (Cargo.toml at root)
+pub fn detect_crate_dir() -> Option<PathBuf> {
+    let current = std::env::current_dir().ok()?;
+    
+    // New structure: Cargo.toml at root with src/
+    if current.join("Cargo.toml").exists() && current.join("src").is_dir() {
+        return Some(current);
+    }
+    
+    // Old structure: api/ subdirectory
+    let api_dir = current.join("api");
+    if api_dir.is_dir() && api_dir.join("Cargo.toml").exists() {
+        return Some(api_dir);
+    }
+    
+    None
+}
+
+/// Get binary name from Cargo.toml
+pub fn get_binary_name(crate_dir: &Path) -> Result<String> {
+    let cargo_toml = crate_dir.join("Cargo.toml");
     if cargo_toml.exists() {
         let content = fs::read_to_string(&cargo_toml)?;
         // Look for [[bin]] name first
@@ -75,12 +94,12 @@ pub fn get_binary_name(api_dir: &Path) -> Result<String> {
     Ok("yeollin-app".to_string())
 }
 
-/// Find binary path for the API
-pub fn find_binary_path(api_dir: &Path) -> Result<std::path::PathBuf> {
-    let binary_name = get_binary_name(api_dir)?;
+/// Find binary path for the crate
+pub fn find_binary_path(crate_dir: &Path) -> Result<std::path::PathBuf> {
+    let binary_name = get_binary_name(crate_dir)?;
     
     // Find workspace root to locate target/debug
-    let mut workspace_root = api_dir.to_path_buf();
+    let mut workspace_root = crate_dir.to_path_buf();
     while !workspace_root.join("target").exists() {
         if !workspace_root.pop() {
             anyhow::bail!("Could not find workspace root with target directory");
@@ -127,11 +146,16 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
     let current_dir = std::env::current_dir()?;
     let output_dir = args.output_dir
         .unwrap_or_else(|| current_dir.join(".yeollin").join("app"));
-    let api_dir = current_dir.join("api");
+    
+    // Detect Rust crate (new structure: Cargo.toml at root, or old: api/)
+    let crate_dir = detect_crate_dir();
 
     info!("Prebuild starting...");
     info!("  Current dir: {}", current_dir.display());
     info!("  Output:      {}", output_dir.display());
+    if let Some(ref dir) = crate_dir {
+        info!("  Crate:       {}", dir.display());
+    }
 
     // Detect app/ in current directory
     let frontend = detect_current_app();
@@ -142,11 +166,11 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
         info!("No app/ directory found, creating template only");
     }
 
-    // Build API first if exists
-    if api_dir.is_dir() {
-        info!("Building API...");
+    // Build crate first if exists
+    if let Some(ref crate_path) = crate_dir {
+        info!("Building crate...");
         let build_status = Command::new("cargo")
-            .current_dir(&api_dir)
+            .current_dir(crate_path)
             .args(["build"])
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -154,13 +178,13 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
             .await?;
 
         if !build_status.success() {
-            anyhow::bail!("Failed to build API");
+            anyhow::bail!("Failed to build crate");
         }
     }
 
     // Export menus and plugins from binary
-    let (menus_json, plugins_json) = if api_dir.is_dir() {
-        let binary_path = find_binary_path(&api_dir)?;
+    let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
+        let binary_path = find_binary_path(crate_path)?;
         
         info!("Exporting menus from binary...");
         let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {

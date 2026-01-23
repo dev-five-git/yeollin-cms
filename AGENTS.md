@@ -13,9 +13,26 @@ Tauri-inspired CMS framework: Rust/Axum backend + Next.js frontend. Plugins bund
 ```
 yeollin-cms/
 ├── crates/           # Rust workspace (core, plugin, app, cli)
-├── packages/         # Node workspace (app = Next.js frontend, types)
-├── plugins/          # Plugin examples (example-app, example-plugin)
+├── packages/         # Node workspace (app = Next.js frontend template)
+├── plugins/          # Plugin crates (example-plugin)
+├── apps/             # Standalone app crates (example-app)
 └── .yeollin/         # Generated at prebuild (gitignored)
+```
+
+## APP/PLUGIN STRUCTURE (NEW)
+
+Both apps and plugins now use the same flat structure with Cargo.toml at root:
+
+```
+my-plugin/            # or my-app/
+├── Cargo.toml        # Rust crate manifest at root
+├── src/              # Rust source code
+│   ├── lib.rs        # Plugin: yeollin_plugin! macro
+│   └── main.rs       # App: entry point
+├── app/              # Frontend (Next.js pages)
+│   └── (group)/      # Route group
+├── package.json      # Node deps for TypeScript DX
+└── tsconfig.json     # TypeScript config
 ```
 
 ## WHERE TO LOOK
@@ -26,8 +43,8 @@ yeollin-cms/
 | App builder | `crates/app/src/app.rs` | YeollinAppBuilder, plugin registration |
 | CLI commands | `crates/cli/src/commands/` | dev, build, prebuild, init |
 | Frontend template | `packages/app/` | Extracted to `.yeollin/app/` at prebuild |
-| Plugin example | `plugins/example-plugin/` | Full plugin structure demo |
-| Standalone app | `plugins/example-app/` | Complete CMS with main.rs |
+| Plugin example | `plugins/example-plugin/` | Library plugin (lib.rs only) |
+| Standalone app | `apps/example-app/` | Complete CMS with main.rs |
 
 ## TECH STACK
 
@@ -42,7 +59,7 @@ yeollin-cms/
 
 ### Plugin Registration
 ```rust
-// plugins/my-plugin/api/src/lib.rs
+// plugins/my-plugin/src/lib.rs
 yeollin_plugin::yeollin_plugin! {
     name: "my-plugin",
     author: "...",
@@ -78,8 +95,8 @@ yeollin_plugin::yeollin_plugin! {
 ## COMMANDS
 
 ```bash
-# Development (from plugin dir)
-cd plugins/example-app
+# Development (from app dir)
+cd apps/example-app
 cargo run -p yeollin-cli -- dev     # Single port dev server
 
 # Build
@@ -102,5 +119,5 @@ bun tsc --noEmit                    # TypeScript (in packages/app)
 
 - `packages/app/` is the TEMPLATE, not the running app
 - Actual frontend runs from `.yeollin/app/` after prebuild
-- Plugin frontend paths: `concat!(env!("CARGO_MANIFEST_DIR"), "/../app")`
+- Plugin frontend paths: `concat!(env!("CARGO_MANIFEST_DIR"), "/app")`
 - menus.json and plugins.json generated at prebuild time

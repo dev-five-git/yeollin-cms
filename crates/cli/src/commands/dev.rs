@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use tokio::process::Command;
 use tracing::{info, debug};
 
-use super::prebuild::{detect_current_app, run_prebuild, find_binary_path, export_from_binary};
+use super::prebuild::{detect_current_app, detect_crate_dir, run_prebuild, find_binary_path, export_from_binary};
 
 #[derive(Args)]
 pub struct DevArgs {
@@ -28,24 +28,23 @@ pub struct DevArgs {
 
 pub async fn run(args: DevArgs) -> Result<()> {
     let current_dir = std::env::current_dir()?;
-    let api_dir = current_dir.join("api");
-    let has_api = api_dir.is_dir();
+    let crate_dir = detect_crate_dir();
     let frontend = detect_current_app();
     
     info!("Development server starting...");
     info!("  Current dir: {}", current_dir.display());
-    info!("  Has api/:    {}", has_api);
+    info!("  Has crate:   {}", crate_dir.is_some());
     info!("  Has app/:    {}", frontend.is_some());
 
-    if !has_api && frontend.is_none() {
-        anyhow::bail!("No api/ or app/ directory found. Run from an app directory.");
+    if crate_dir.is_none() && frontend.is_none() {
+        anyhow::bail!("No Cargo.toml or app/ directory found. Run from an app/plugin directory.");
     }
 
-    // 1. Build API if exists
-    if has_api {
-        info!("Building API...");
+    // 1. Build crate if exists
+    if let Some(ref crate_path) = crate_dir {
+        info!("Building crate...");
         let build_status = Command::new("cargo")
-            .current_dir(&api_dir)
+            .current_dir(crate_path)
             .args(["build"])
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -53,13 +52,13 @@ pub async fn run(args: DevArgs) -> Result<()> {
             .await?;
 
         if !build_status.success() {
-            anyhow::bail!("Failed to build API");
+            anyhow::bail!("Failed to build crate");
         }
     }
 
     // 2. Export menus and plugins from binary (after build)
-    let (menus_json, plugins_json) = if has_api {
-        let binary_path = find_binary_path(&api_dir)?;
+    let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
+        let binary_path = find_binary_path(crate_path)?;
         
         info!("Exporting menus from binary...");
         let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {
@@ -143,10 +142,10 @@ pub async fn run(args: DevArgs) -> Result<()> {
     }
 
     // 6. Start API server
-    let mut cargo_handle = if has_api {
+    let mut cargo_handle = if let Some(ref crate_path) = crate_dir {
         let mut cargo_cmd = Command::new("cargo");
         cargo_cmd
-            .current_dir(&api_dir)
+            .current_dir(crate_path)
             .args(["run"])
             .env("PORT", args.port.to_string());
         

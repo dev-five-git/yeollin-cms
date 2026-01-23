@@ -10,8 +10,8 @@ name = "example-app"
 path = "src/main.rs"
 
 [dependencies]
-yeollin-app = { path = "../../../crates/app" }
-example-plugin = { path = "../../../plugins/example-plugin/api" }
+yeollin-app = { path = "../../crates/app" }
+example-plugin = { path = "../../plugins/example-plugin" }
 
 vespera = { workspace = true }
 serde = { workspace = true }

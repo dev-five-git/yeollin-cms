@@ -57,7 +57,7 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{vespera, FrontendAssets, PluginMetadata};
 
-        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/app");
 
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
@@ -81,7 +81,7 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{FrontendAssets, PluginMetadata};
 
-        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/app");
 
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
@@ -144,7 +144,7 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{vespera, FrontendAssets, PluginMetadata};
 
-        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/app");
 
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
@@ -166,7 +166,7 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{FrontendAssets, PluginMetadata};
 
-        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/app");
 
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
@@ -186,7 +186,7 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{vespera, FrontendAssets, PluginMetadata};
 
-        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/app");
 
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
@@ -206,7 +206,7 @@ macro_rules! yeollin_plugin {
     ) => {
         use $crate::{FrontendAssets, PluginMetadata};
 
-        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app");
+        const FRONTEND_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/app");
 
         /// Plugin metadata entry point
         pub fn metadata() -> PluginMetadata {
