@@ -29,7 +29,7 @@ export default function MemoListPage() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch('/api/memos')
+      const response = await fetch('/memo')
       if (!response.ok) {
         throw new Error('Failed to fetch memos')
       }
@@ -69,7 +69,7 @@ export default function MemoListPage() {
     setError('')
 
     try {
-      const url = editingMemo ? `/api/memos/${editingMemo.id}` : '/api/memos'
+      const url = editingMemo ? `/memo/${editingMemo.id}` : '/memo'
       const method = editingMemo ? 'PATCH' : 'POST'
 
       const response = await fetch(url, {
@@ -98,7 +98,7 @@ export default function MemoListPage() {
     }
 
     try {
-      const response = await fetch(`/api/memos/${id}`, { method: 'DELETE' })
+      const response = await fetch(`/memo/${id}`, { method: 'DELETE' })
       if (!response.ok) {
         const data = await response.json()
         throw new Error(data.error || 'Failed to delete memo')
