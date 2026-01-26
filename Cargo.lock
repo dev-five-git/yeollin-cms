@@ -946,7 +946,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2364,14 +2364,14 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
 name = "quote"
-version = "1.0.43"
+version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc74d9a594b72ae6656596548f56f667211f8a97b3d4c3d467150794690dc40a"
+checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
 dependencies = [
  "proc-macro2",
 ]
@@ -2717,7 +2717,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2814,9 +2814,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm"
-version = "2.0.0-rc.28"
+version = "2.0.0-rc.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fe6e5203d25568227d8dfbbfb362051e1ccac66bd5200538ed0f50f763cd980"
+checksum = "7c0bd18a658e2b86d6d4a95972904fce25a7201e177eda4707cd109775c357d6"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2846,11 +2846,12 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-macros"
-version = "2.0.0-rc.28"
+version = "2.0.0-rc.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "719c5ba754a5cb517f9ac6fc9f581bfb791ed1aabfc4e72faa9ab810922b87ad"
+checksum = "1a2688c437a2529a06e4e6dad2f11cc500b141da112ff971db6289fd9a2e1961"
 dependencies = [
  "heck 0.5.0",
+ "itertools",
  "pluralizer",
  "proc-macro2",
  "quote",
@@ -3958,21 +3959,24 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vespera"
-version = "0.1.21"
+version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4633b15b28222d26e35bc6c6aafa34b7fa010e449c1f5b54dc90516793c02c56"
+checksum = "a8fb87af7ec5cee01dd2e6d7d023638d53048a9522274ba7c3f3e7c11e9f8b64"
 dependencies = [
  "axum",
  "axum-extra",
+ "serde_json",
+ "tower-layer",
+ "tower-service",
  "vespera_core",
  "vespera_macro",
 ]
 
 [[package]]
 name = "vespera_core"
-version = "0.1.21"
+version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35f65fce52782d1249cb99f0122b8027fc016842e2b19cab67e2afd0079f1525"
+checksum = "146884f5b6dcbbede925abdd4673d6ed68b6a1f71027fdf5279b686033bc4939"
 dependencies = [
  "serde",
  "serde_json",
@@ -3980,9 +3984,9 @@ dependencies = [
 
 [[package]]
 name = "vespera_macro"
-version = "0.1.21"
+version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "195d57df17dfd81c57d731563ddbe650715b57d7a6b85ffd6b56b67d0c14b568"
+checksum = "f6957e4ee002b033b884a1283cf360f7696b71bffd82800714d17d96077a095b"
 dependencies = [
  "anyhow",
  "proc-macro2",
@@ -4249,7 +4253,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4658,6 +4662,7 @@ dependencies = [
  "yeollin-auth",
  "yeollin-core",
  "yeollin-plugin",
+ "yeollin-plugin-macros",
 ]
 
 [[package]]
@@ -4720,6 +4725,16 @@ dependencies = [
  "vespera",
  "yeollin-auth",
  "yeollin-core",
+ "yeollin-plugin-macros",
+]
+
+[[package]]
+name = "yeollin-plugin-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
 ]
 
 [[package]]

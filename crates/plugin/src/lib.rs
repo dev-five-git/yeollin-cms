@@ -9,16 +9,22 @@
 //!
 //! yeollin_plugin::yeollin_plugin! {
 //!     name: "my-plugin",
+//!     author: "Your Name",
 //!     description: "My awesome plugin",
 //! }
+//!
+//! // Auto-generates: vespera::export_app!(MyPlugin);
+//! // Plugin name "my-plugin" → export identifier `MyPlugin`
 //! ```
 
 mod frontend;
-mod macros;
 mod metadata;
 
 pub use frontend::*;
 pub use metadata::*;
+
+// Re-export yeollin_plugin! proc-macro (auto-infers export name from plugin name)
+pub use yeollin_plugin_macros::yeollin_plugin;
 
 // Re-export for convenience
 pub use include_dir;

@@ -4,6 +4,7 @@ members = [
     "crates/core",
     "crates/auth",
     "crates/plugin",
+    "crates/plugin-macros",
     "crates/app",
     "crates/cli",
     "plugins/example-plugin",
@@ -31,10 +32,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Database
-sea-orm = { version = "^2.0.0-rc", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
+sea-orm = { version = "^2.0.0-rc.29", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
 
 # OpenAPI
-vespera = "^0.1"
+vespera = "^0.1.23"
 vespertide = "^0.1"
 
 # Tracing
@@ -72,3 +73,4 @@ rand = "0.9"
 yeollin-core = { path = "crates/core" }
 yeollin-auth = { path = "crates/auth" }
 yeollin-plugin = { path = "crates/plugin" }
+yeollin-plugin-macros = { path = "crates/plugin-macros" }
