@@ -2,6 +2,7 @@
   "name": "yeollin-cms",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Open, extensible CMS framework inspired by Tauri",
   "workspaces": [
     "packages/*",
@@ -20,8 +21,8 @@
     "check": "cargo check --workspace"
   },
   "devDependencies": {
-    "typescript": "^5.9",
-    "oxlint": "^1.41",
-    "eslint-plugin-devup": "^2.0"
+    "typescript": "^7.0",
+    "oxlint": "^1.79",
+    "eslint-plugin-devup": "^2.1"
   }
 }
