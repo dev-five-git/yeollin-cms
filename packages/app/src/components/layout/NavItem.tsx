@@ -1,8 +1,8 @@
 'use client'
 
+import { Box, Flex, Text } from '@devup-ui/react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Box, Flex, Text } from '@devup-ui/react'
 
 interface MenuItem {
   id: string
@@ -29,6 +29,7 @@ export function NavItem({ item }: NavItemProps) {
     <Box>
       <Link href={item.path} style={{ textDecoration: 'none' }}>
         <Flex
+          _hover={{ bg: isActive ? '$primary' : '$backgroundSecondary' }}
           alignItems="center"
           bg={isActive ? '$primary' : 'transparent'}
           borderRadius="8px"
@@ -36,7 +37,6 @@ export function NavItem({ item }: NavItemProps) {
           gap={3}
           px={3}
           py={2}
-          _hover={{ bg: isActive ? '$primary' : '$backgroundSecondary' }}
         >
           <Text fontSize="14px">{item.label}</Text>
         </Flex>
@@ -51,13 +51,17 @@ export function NavItem({ item }: NavItemProps) {
               style={{ textDecoration: 'none' }}
             >
               <Flex
+                _hover={{ bg: '$backgroundSecondary' }}
                 alignItems="center"
-                bg={pathname === child.path ? '$backgroundSecondary' : 'transparent'}
+                bg={
+                  pathname === child.path
+                    ? '$backgroundSecondary'
+                    : 'transparent'
+                }
                 borderRadius="8px"
                 color={pathname === child.path ? '$primary' : '$textSecondary'}
                 px={3}
                 py={2}
-                _hover={{ bg: '$backgroundSecondary' }}
               >
                 <Text fontSize="13px">{child.label}</Text>
               </Flex>

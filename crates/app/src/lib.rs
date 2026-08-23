@@ -34,6 +34,12 @@ pub use static_files::static_router;
 pub use yeollin_core::*;
 pub use yeollin_plugin::PluginMetadata;
 
+// Re-export yeollin_app! proc-macro for apps
+pub use yeollin_plugin_macros::yeollin_app;
+
+// Re-export vespera for yeollin_app! macro usage
+pub use vespera;
+
 // Re-export auth utilities for plugins and apps
 pub use yeollin_auth::{
     auth_middleware, generate_access_token, generate_token, hash_password, verify_password,

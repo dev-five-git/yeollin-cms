@@ -63,7 +63,7 @@ pub struct ErrorResponse {
 }
 
 /// List all memos
-#[vespera::route(get, path = "/api/memos", tags = ["memo"])]
+#[vespera::route(get, tags = ["memo"])]
 pub async fn list_memos(
     Extension(db): Extension<DatabaseConnection>,
 ) -> Result<Json<ListMemosResponse>, (axum::http::StatusCode, Json<ErrorResponse>)> {
@@ -88,7 +88,7 @@ pub async fn list_memos(
 }
 
 /// Get a memo by ID
-#[vespera::route(get, path = "/api/memos/{id}", tags = ["memo"])]
+#[vespera::route(get, path = "/{id}", tags = ["memo"])]
 pub async fn get_memo(
     Extension(db): Extension<DatabaseConnection>,
     Path(id): Path<i32>,
@@ -116,7 +116,7 @@ pub async fn get_memo(
 }
 
 /// Create a new memo
-#[vespera::route(post, path = "/api/memos", tags = ["memo"])]
+#[vespera::route(post, tags = ["memo"])]
 pub async fn create_memo(
     Extension(db): Extension<DatabaseConnection>,
     Json(req): Json<CreateMemoRequest>,
@@ -144,7 +144,7 @@ pub async fn create_memo(
 }
 
 /// Update a memo
-#[vespera::route(patch, path = "/api/memos/{id}", tags = ["memo"])]
+#[vespera::route(patch, path = "/{id}", tags = ["memo"])]
 pub async fn update_memo(
     Extension(db): Extension<DatabaseConnection>,
     Path(id): Path<i32>,
@@ -196,7 +196,7 @@ pub async fn update_memo(
 }
 
 /// Delete a memo
-#[vespera::route(delete, path = "/api/memos/{id}", tags = ["memo"])]
+#[vespera::route(delete, path = "/{id}", tags = ["memo"])]
 pub async fn delete_memo(
     Extension(db): Extension<DatabaseConnection>,
     Path(id): Path<i32>,

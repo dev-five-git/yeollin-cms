@@ -50,6 +50,8 @@ pub fn dev_proxy_router(target_port: u16) -> Router {
 
     Router::new()
         // WebSocket routes for HMR
+        // Turbopack (Next.js 16 default) uses /_next/hmr; webpack uses /_next/webpack-hmr
+        .route("/_next/hmr", get(websocket_handler))
         .route("/_next/webpack-hmr", get(websocket_handler))
         .route("/__nextjs_original-stack-frames", get(websocket_handler))
         // HTTP fallback for everything else

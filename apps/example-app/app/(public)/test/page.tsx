@@ -1,10 +1,9 @@
-
 import { Box, Text } from '@devup-ui/react'
 
 export default function SignInPage() {
   return (
     <Box p={6}>
-      <Text typography="heading" mb={4}>
+      <Text mb={4} typography="heading">
         Sign In
       </Text>
     </Box>

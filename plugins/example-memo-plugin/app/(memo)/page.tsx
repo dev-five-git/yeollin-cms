@@ -1,19 +1,28 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
 import { Box, Flex, Text, VStack } from '@devup-ui/react'
+import { useCallback, useEffect, useState } from 'react'
 
 interface Memo {
   id: number
   title: string
   content: string
-  created_at: string
-  updated_at: string
+  createdAt: string
+  updatedAt: string
 }
 
 interface MemoForm {
   title: string
   content: string
+}
+
+async function fetchMemoList(): Promise<Memo[]> {
+  const response = await fetch('/memo')
+  if (!response.ok) {
+    throw new Error('Failed to fetch memos')
+  }
+  const data = await response.json()
+  return data.memos || []
 }
 
 export default function MemoListPage() {
@@ -25,16 +34,12 @@ export default function MemoListPage() {
   const [formData, setFormData] = useState<MemoForm>({ title: '', content: '' })
   const [submitting, setSubmitting] = useState(false)
 
+  // Refetch after a mutation: resets the list state before loading again.
   const fetchMemos = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch('/api/memos')
-      if (!response.ok) {
-        throw new Error('Failed to fetch memos')
-      }
-      const data = await response.json()
-      setMemos(data.memos || [])
+      setMemos(await fetchMemoList())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -42,9 +47,26 @@ export default function MemoListPage() {
     }
   }, [])
 
+  // Initial load. Runs inline so no state is set synchronously during the
+  // effect, and drops its result if the component unmounts mid-flight.
   useEffect(() => {
-    fetchMemos()
-  }, [fetchMemos])
+    let cancelled = false
+    void (async () => {
+      try {
+        const memos = await fetchMemoList()
+        if (!cancelled) setMemos(memos)
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'An error occurred')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const handleOpenForm = (memo?: Memo) => {
     if (memo) {
@@ -69,7 +91,7 @@ export default function MemoListPage() {
     setError('')
 
     try {
-      const url = editingMemo ? `/api/memos/${editingMemo.id}` : '/api/memos'
+      const url = editingMemo ? `/memo/${editingMemo.id}` : '/memo'
       const method = editingMemo ? 'PATCH' : 'POST'
 
       const response = await fetch(url, {
@@ -98,7 +120,7 @@ export default function MemoListPage() {
     }
 
     try {
-      const response = await fetch(`/api/memos/${id}`, { method: 'DELETE' })
+      const response = await fetch(`/memo/${id}`, { method: 'DELETE' })
       if (!response.ok) {
         const data = await response.json()
         throw new Error(data.error || 'Failed to delete memo')
@@ -111,46 +133,46 @@ export default function MemoListPage() {
 
   return (
     <Flex
-      minH="100vh"
       alignItems="flex-start"
-      justifyContent="center"
       bg="$backgroundSecondary"
-      py={8}
+      justifyContent="center"
+      minH="100vh"
       px={4}
+      py={8}
     >
       <Box
         bg="$background"
-        p={8}
-        borderRadius="16px"
         border="1px solid $border"
-        w="100%"
-        maxW="800px"
+        borderRadius="16px"
         boxShadow="0 4px 24px rgba(0, 0, 0, 0.1)"
+        maxW="800px"
+        p={8}
+        w="100%"
       >
-        <VStack gap={6} alignItems="stretch">
-          <Flex justifyContent="space-between" alignItems="center">
-            <VStack gap={1} alignItems="flex-start">
+        <VStack alignItems="stretch" gap={6}>
+          <Flex alignItems="center" justifyContent="space-between">
+            <VStack alignItems="flex-start" gap={1}>
               <Text typography="heading">Memos</Text>
-              <Text typography="body" color="$textSecondary">
+              <Text color="$textSecondary" typography="body">
                 Manage your memos
               </Text>
             </VStack>
             <Box
+              _active={{ transform: 'scale(0.98)' }}
+              _hover={{ bg: '$primaryHover' }}
               as="button"
-              type="button"
+              bg="$primary"
+              border="none"
+              borderRadius="8px"
+              color="white"
+              cursor="pointer"
+              fontSize="14px"
+              fontWeight="600"
               onClick={() => handleOpenForm()}
               p={3}
               px={4}
-              borderRadius="8px"
-              border="none"
-              bg="$primary"
-              color="white"
-              fontSize="14px"
-              fontWeight="600"
-              cursor="pointer"
               transition="all 0.2s ease"
-              _hover={{ bg: '$primaryHover' }}
-              _active={{ transform: 'scale(0.98)' }}
+              type="button"
             >
               Add Memo
             </Box>
@@ -159,11 +181,11 @@ export default function MemoListPage() {
           {error && (
             <Box
               bg="$errorLight"
-              p={3}
-              borderRadius="8px"
               border="1px solid $error"
+              borderRadius="8px"
+              p={3}
             >
-              <Text typography="body" color="$error">
+              <Text color="$error" typography="body">
                 {error}
               </Text>
             </Box>
@@ -172,107 +194,117 @@ export default function MemoListPage() {
           {isFormOpen && (
             <Box
               bg="$backgroundSecondary"
-              p={6}
-              borderRadius="12px"
               border="1px solid $border"
+              borderRadius="12px"
+              p={6}
             >
               <form onSubmit={handleSubmit}>
-                <VStack gap={4} alignItems="stretch">
+                <VStack alignItems="stretch" gap={4}>
                   <Text typography="subheading">
                     {editingMemo ? 'Edit Memo' : 'New Memo'}
                   </Text>
 
-                  <VStack gap={2} alignItems="stretch">
-                    <Text as="label" typography="label" htmlFor="memo-title">
+                  <VStack alignItems="stretch" gap={2}>
+                    <Text as="label" htmlFor="memo-title" typography="label">
                       Title
                     </Text>
                     <Box
-                      as="input"
-                      id="memo-title"
-                      type="text"
-                      value={formData.title}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        setFormData((prev) => ({ ...prev, title: e.target.value }))
-                      }
-                      required
-                      p={3}
-                      borderRadius="8px"
-                      border="1px solid $border"
-                      bg="$background"
-                      color="$text"
-                      fontSize="16px"
-                      outline="none"
                       _focus={{ borderColor: '$primary' }}
                       _placeholder={{ color: '$textTertiary' }}
+                      as="input"
+                      bg="$background"
+                      border="1px solid $border"
+                      borderRadius="8px"
+                      color="$text"
+                      fontSize="16px"
+                      id="memo-title"
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          title: e.target.value,
+                        }))
+                      }
+                      outline="none"
+                      p={3}
                       placeholder="Enter memo title"
+                      required
+                      type="text"
+                      value={formData.title}
                     />
                   </VStack>
 
-                  <VStack gap={2} alignItems="stretch">
-                    <Text as="label" typography="label" htmlFor="memo-content">
+                  <VStack alignItems="stretch" gap={2}>
+                    <Text as="label" htmlFor="memo-content" typography="label">
                       Content
                     </Text>
                     <Box
-                      as="textarea"
-                      id="memo-content"
-                      value={formData.content}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        setFormData((prev) => ({ ...prev, content: e.target.value }))
-                      }
-                      required
-                      p={3}
-                      borderRadius="8px"
-                      border="1px solid $border"
-                      bg="$background"
-                      color="$text"
-                      fontSize="16px"
-                      outline="none"
-                      minH="120px"
-                      resize="vertical"
                       _focus={{ borderColor: '$primary' }}
                       _placeholder={{ color: '$textTertiary' }}
+                      as="textarea"
+                      bg="$background"
+                      border="1px solid $border"
+                      borderRadius="8px"
+                      color="$text"
+                      fontSize="16px"
+                      id="memo-content"
+                      minH="120px"
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          content: e.target.value,
+                        }))
+                      }
+                      outline="none"
+                      p={3}
                       placeholder="Enter memo content"
+                      required
+                      resize="vertical"
+                      value={formData.content}
                     />
                   </VStack>
 
                   <Flex gap={3} justifyContent="flex-end">
                     <Box
+                      _hover={{ bg: '$backgroundSecondary' }}
                       as="button"
-                      type="button"
+                      bg="$background"
+                      border="1px solid $border"
+                      borderRadius="8px"
+                      color="$text"
+                      cursor="pointer"
+                      fontSize="14px"
+                      fontWeight="500"
                       onClick={handleCloseForm}
                       p={3}
                       px={4}
-                      borderRadius="8px"
-                      border="1px solid $border"
-                      bg="$background"
-                      color="$text"
-                      fontSize="14px"
-                      fontWeight="500"
-                      cursor="pointer"
                       transition="all 0.2s ease"
-                      _hover={{ bg: '$backgroundSecondary' }}
+                      type="button"
                     >
                       Cancel
                     </Box>
                     <Box
+                      _active={{ transform: 'scale(0.98)' }}
+                      _hover={{ bg: '$primaryHover' }}
                       as="button"
-                      type="submit"
-                      disabled={submitting}
-                      p={3}
-                      px={4}
-                      borderRadius="8px"
-                      border="none"
                       bg="$primary"
+                      border="none"
+                      borderRadius="8px"
                       color="white"
+                      cursor={submitting ? 'not-allowed' : 'pointer'}
+                      disabled={submitting}
                       fontSize="14px"
                       fontWeight="600"
-                      cursor={submitting ? 'not-allowed' : 'pointer'}
                       opacity={submitting ? 0.7 : 1}
+                      p={3}
+                      px={4}
                       transition="all 0.2s ease"
-                      _hover={{ bg: '$primaryHover' }}
-                      _active={{ transform: 'scale(0.98)' }}
+                      type="submit"
                     >
-                      {submitting ? 'Saving...' : editingMemo ? 'Update' : 'Create'}
+                      {submitting
+                        ? 'Saving...'
+                        : editingMemo
+                          ? 'Update'
+                          : 'Create'}
                     </Box>
                   </Flex>
                 </VStack>
@@ -282,94 +314,104 @@ export default function MemoListPage() {
 
           {loading ? (
             <Flex justifyContent="center" py={8}>
-              <Text typography="body" color="$textSecondary">
+              <Text color="$textSecondary" typography="body">
                 Loading memos...
               </Text>
             </Flex>
           ) : memos.length === 0 ? (
             <Flex
-              justifyContent="center"
               alignItems="center"
-              py={8}
-              borderRadius="12px"
               border="1px dashed $border"
+              borderRadius="12px"
+              justifyContent="center"
+              py={8}
             >
-              <VStack gap={2} alignItems="center">
-                <Text typography="body" color="$textSecondary">
+              <VStack alignItems="center" gap={2}>
+                <Text color="$textSecondary" typography="body">
                   No memos yet
                 </Text>
-                <Text typography="label" color="$textTertiary">
-                  Click "Add Memo" to create your first memo
+                <Text color="$textTertiary" typography="label">
+                  Click &quot;Add Memo&quot; to create your first memo
                 </Text>
               </VStack>
             </Flex>
           ) : (
-            <VStack gap={3} alignItems="stretch">
+            <VStack alignItems="stretch" gap={3}>
               {memos.map((memo) => (
                 <Box
                   key={memo.id}
+                  _hover={{
+                    borderColor: '$primary',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
+                  }}
                   bg="$backgroundSecondary"
-                  p={4}
-                  borderRadius="12px"
                   border="1px solid $border"
+                  borderRadius="12px"
+                  p={4}
                   transition="all 0.2s ease"
-                  _hover={{ borderColor: '$primary', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)' }}
                 >
-                  <Flex justifyContent="space-between" alignItems="flex-start" gap={4}>
-                    <VStack gap={2} alignItems="flex-start" flex={1}>
-                      <Text typography="subheading" color="$text">
+                  <Flex
+                    alignItems="flex-start"
+                    gap={4}
+                    justifyContent="space-between"
+                  >
+                    <VStack alignItems="flex-start" flex={1} gap={2}>
+                      <Text color="$text" typography="subheading">
                         {memo.title}
                       </Text>
                       <Text
-                        typography="body"
                         color="$textSecondary"
+                        maxW="100%"
                         overflow="hidden"
                         textOverflow="ellipsis"
+                        typography="body"
                         whiteSpace="nowrap"
-                        maxW="100%"
                       >
                         {memo.content.length > 100
                           ? `${memo.content.substring(0, 100)}...`
                           : memo.content}
                       </Text>
-                      <Text typography="label" color="$textTertiary">
-                        {new Date(memo.updated_at).toLocaleDateString()}
+                      <Text color="$textTertiary" typography="label">
+                        {new Date(memo.updatedAt).toLocaleDateString()}
                       </Text>
                     </VStack>
                     <Flex gap={2}>
                       <Box
+                        _hover={{
+                          bg: '$backgroundSecondary',
+                          borderColor: '$primary',
+                        }}
                         as="button"
-                        type="button"
+                        bg="$background"
+                        border="1px solid $border"
+                        borderRadius="6px"
+                        color="$text"
+                        cursor="pointer"
+                        fontSize="13px"
+                        fontWeight="500"
                         onClick={() => handleOpenForm(memo)}
                         p={2}
                         px={3}
-                        borderRadius="6px"
-                        border="1px solid $border"
-                        bg="$background"
-                        color="$text"
-                        fontSize="13px"
-                        fontWeight="500"
-                        cursor="pointer"
                         transition="all 0.2s ease"
-                        _hover={{ bg: '$backgroundSecondary', borderColor: '$primary' }}
+                        type="button"
                       >
                         Edit
                       </Box>
                       <Box
+                        _hover={{ bg: '$errorLight' }}
                         as="button"
-                        type="button"
+                        bg="$background"
+                        border="1px solid $error"
+                        borderRadius="6px"
+                        color="$error"
+                        cursor="pointer"
+                        fontSize="13px"
+                        fontWeight="500"
                         onClick={() => handleDelete(memo.id)}
                         p={2}
                         px={3}
-                        borderRadius="6px"
-                        border="1px solid $error"
-                        bg="$background"
-                        color="$error"
-                        fontSize="13px"
-                        fontWeight="500"
-                        cursor="pointer"
                         transition="all 0.2s ease"
-                        _hover={{ bg: '$errorLight' }}
+                        type="button"
                       >
                         Delete
                       </Box>

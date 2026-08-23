@@ -14,7 +14,7 @@ export default function AuthLayout({
       <Sidebar />
       <Flex flex={1} flexDirection="column" overflow="hidden">
         <Header />
-        <Box flex={1} overflow="auto" bg="$backgroundSecondary">
+        <Box bg="$backgroundSecondary" flex={1} overflow="auto">
           {children}
         </Box>
       </Flex>

@@ -17,6 +17,7 @@ path = "src/lib.rs"
 yeollin-core = { workspace = true }
 yeollin-auth = { workspace = true }
 yeollin-plugin = { workspace = true }
+yeollin-plugin-macros = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }

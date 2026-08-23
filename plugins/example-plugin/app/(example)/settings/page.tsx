@@ -5,29 +5,29 @@ import { Box, Flex, Text } from '@devup-ui/react'
 export default function SettingsPage() {
   return (
     <Box p={6}>
-      <Text typography="heading" mb={4}>
+      <Text mb={4} typography="heading">
         Settings
       </Text>
-      <Box bg="$background" p={4} borderRadius="8px" border="1px solid $border">
+      <Box bg="$background" border="1px solid $border" borderRadius="8px" p={4}>
         <Flex flexDirection="column" gap={4}>
           <Box>
-            <Text typography="label" mb={1}>
+            <Text mb={1} typography="label">
               Plugin Name
             </Text>
             <Text color="$textSecondary">example-plugin</Text>
           </Box>
           <Box>
-            <Text typography="label" mb={1}>
+            <Text mb={1} typography="label">
               Version
             </Text>
             <Text color="$textSecondary">0.1.0</Text>
           </Box>
           <Box>
-            <Text typography="label" mb={1}>
+            <Text mb={1} typography="label">
               Status
             </Text>
             <Flex alignItems="center" gap={2}>
-              <Box w="8px" h="8px" borderRadius="50%" bg="$success" />
+              <Box bg="$success" borderRadius="50%" h="8px" w="8px" />
               <Text color="$success">Active</Text>
             </Flex>
           </Box>

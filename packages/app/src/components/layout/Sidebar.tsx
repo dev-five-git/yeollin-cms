@@ -1,6 +1,6 @@
+import { Box, Flex, Text } from '@devup-ui/react'
 import { readFile } from 'fs/promises'
 import path from 'path'
-import { Box, Flex, Text } from '@devup-ui/react'
 
 import { NavItem } from './NavItem'
 
@@ -37,11 +37,11 @@ export async function Sidebar() {
     <Box
       bg="$background"
       borderRight="1px solid $border"
+      display="flex"
+      flexDirection="column"
       h="100vh"
       p={4}
       w="260px"
-      display="flex"
-      flexDirection="column"
     >
       {/* Logo */}
       <Flex alignItems="center" gap={2} mb={6} px={2}>
@@ -62,15 +62,15 @@ export async function Sidebar() {
       </Flex>
 
       {/* Plugin Navigation */}
-      <Flex flexDirection="column" gap={1} flex={1}>
+      <Flex flex={1} flexDirection="column" gap={1}>
         {pluginMenuItems.map((item) => (
           <NavItem key={item.id} item={item} />
         ))}
       </Flex>
 
       {/* System Navigation */}
-      <Box borderTop="1px solid $border" pt={4} mt={4}>
-        <Text typography="label" color="$textTertiary" px={2} mb={2}>
+      <Box borderTop="1px solid $border" mt={4} pt={4}>
+        <Text color="$textTertiary" mb={2} px={2} typography="label">
           System
         </Text>
         <Flex flexDirection="column" gap={1}>

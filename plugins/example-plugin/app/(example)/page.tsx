@@ -5,17 +5,17 @@ import { Box, Flex, Text } from '@devup-ui/react'
 export default function ExampleDashboard() {
   return (
     <Box p={6}>
-      <Text typography="heading" mb={4}>
+      <Text mb={4} typography="heading">
         Example Plugin
       </Text>
-      <Flex gap={4} flexDirection="column">
+      <Flex flexDirection="column" gap={4}>
         <Box
           bg="$background"
-          p={4}
-          borderRadius="8px"
           border="1px solid $border"
+          borderRadius="8px"
+          p={4}
         >
-          <Text typography="subheading" mb={2}>
+          <Text mb={2} typography="subheading">
             Welcome
           </Text>
           <Text color="$textSecondary">

@@ -1,7 +1,7 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { Box, Flex, Text } from '@devup-ui/react'
+import { useRouter } from 'next/navigation'
 
 /**
  * Header component with logout functionality.
@@ -31,6 +31,7 @@ export function Header() {
       w="100%"
     >
       <Flex
+        _hover={{ bg: '$backgroundSecondary', color: '$text' }}
         alignItems="center"
         borderRadius="6px"
         color="$textSecondary"
@@ -38,7 +39,6 @@ export function Header() {
         onClick={handleLogout}
         px={3}
         py={2}
-        _hover={{ bg: '$backgroundSecondary', color: '$text' }}
       >
         <Text typography="label">Logout</Text>
       </Flex>

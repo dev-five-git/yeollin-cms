@@ -40,26 +40,27 @@ async fn main() -> anyhow::Result<()> {
     let auth_config =
         AuthConfig::new(jwt_secret).superadmin(superadmin_username.clone(), superadmin_password);
 
-    let db = Database::connect("sqlite://./db.sqlite").await?;
+    // `mode=rwc` creates the file on first run; vespertide provisions the schema
+    // on plugin init, so the database is not checked into version control.
+    let db = Database::connect("sqlite://./db.sqlite?mode=rwc").await?;
 
     tracing::info!(username = %superadmin_username, "Superadmin configured");
 
-    // Create app builder
-    let app = yeollin::app()
-        .host("0.0.0.0")
-        .port(port)
-        .with_auth(auth_config)
-        .with_database(db)
-        .register_plugin(example_plugin::metadata())
-        .register_plugin(example_memo_plugin::metadata())
-        .merge(vespera::vespera!(
-            openapi = "openapi.json",
-            title = "Example CMS API",
-            version = "1.0.0",
-            docs_url = "/docs",
-            redoc_url = "/redoc"
-        ))
-        .build();
+    // Create app builder using yeollin_app! macro
+    // This macro handles both register_plugin() and vespera merge in one call
+    let app = yeollin::yeollin_app! {
+        plugins: [example_plugin, example_memo_plugin],
+        openapi: "openapi.json",
+        title: "Example CMS API",
+        version: "1.0.0",
+        docs_url: "/docs",
+        redoc_url: "/redoc",
+    }
+    .host("0.0.0.0")
+    .port(port)
+    .with_auth(auth_config)
+    .with_database(db)
+    .build();
 
     tracing::info!(menus = %app.export_menus_json(), "Registered menus");
 

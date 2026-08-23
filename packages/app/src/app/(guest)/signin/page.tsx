@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Box, Flex, Text, VStack } from '@devup-ui/react'
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 
 export default function SignInPage() {
   const router = useRouter()
@@ -48,120 +48,120 @@ export default function SignInPage() {
 
   return (
     <Flex
-      h="100vh"
       alignItems="center"
-      justifyContent="center"
       bg="$backgroundSecondary"
+      h="100vh"
+      justifyContent="center"
     >
       <Box
         bg="$background"
-        p={8}
-        borderRadius="16px"
         border="1px solid $border"
-        w="100%"
-        maxW="400px"
+        borderRadius="16px"
         boxShadow="0 4px 24px rgba(0, 0, 0, 0.1)"
+        maxW="400px"
+        p={8}
+        w="100%"
       >
-        <VStack gap={6} alignItems="stretch">
-          <VStack gap={2} alignItems="center">
-            <Text typography="heading" textAlign="center">
+        <VStack alignItems="stretch" gap={6}>
+          <VStack alignItems="center" gap={2}>
+            <Text textAlign="center" typography="heading">
               Yeollin CMS
             </Text>
-            <Text typography="body" color="$textSecondary" textAlign="center">
+            <Text color="$textSecondary" textAlign="center" typography="body">
               Sign in to your account
             </Text>
           </VStack>
 
           <form onSubmit={handleSubmit}>
-            <VStack gap={4} alignItems="stretch">
+            <VStack alignItems="stretch" gap={4}>
               {error && (
                 <Box
                   bg="$errorLight"
-                  p={3}
-                  borderRadius="8px"
                   border="1px solid $error"
+                  borderRadius="8px"
+                  p={3}
                 >
-                  <Text typography="body" color="$error">
+                  <Text color="$error" typography="body">
                     {error}
                   </Text>
                 </Box>
               )}
 
-              <VStack gap={2} alignItems="stretch">
-                <Text as="label" typography="label" htmlFor="username">
+              <VStack alignItems="stretch" gap={2}>
+                <Text as="label" htmlFor="username" typography="label">
                   Username
                 </Text>
                 <Box
+                  _focus={{ borderColor: '$primary' }}
+                  _placeholder={{ color: '$textTertiary' }}
                   as="input"
+                  bg="$background"
+                  border="1px solid $border"
+                  borderRadius="8px"
+                  color="$text"
+                  fontSize="16px"
                   id="username"
-                  type="text"
-                  value={username}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setUsername(e.target.value)
                   }
-                  required
-                  p={3}
-                  borderRadius="8px"
-                  border="1px solid $border"
-                  bg="$background"
-                  color="$text"
-                  fontSize="16px"
                   outline="none"
-                  _focus={{ borderColor: '$primary' }}
-                  _placeholder={{ color: '$textTertiary' }}
+                  p={3}
                   placeholder="Enter username"
+                  required
+                  type="text"
+                  value={username}
                 />
               </VStack>
 
-              <VStack gap={2} alignItems="stretch">
-                <Text as="label" typography="label" htmlFor="password">
+              <VStack alignItems="stretch" gap={2}>
+                <Text as="label" htmlFor="password" typography="label">
                   Password
                 </Text>
                 <Box
+                  _focus={{ borderColor: '$primary' }}
+                  _placeholder={{ color: '$textTertiary' }}
                   as="input"
+                  bg="$background"
+                  border="1px solid $border"
+                  borderRadius="8px"
+                  color="$text"
+                  fontSize="16px"
                   id="password"
-                  type="password"
-                  value={password}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setPassword(e.target.value)
                   }
-                  required
-                  p={3}
-                  borderRadius="8px"
-                  border="1px solid $border"
-                  bg="$background"
-                  color="$text"
-                  fontSize="16px"
                   outline="none"
-                  _focus={{ borderColor: '$primary' }}
-                  _placeholder={{ color: '$textTertiary' }}
+                  p={3}
                   placeholder="Enter password"
+                  required
+                  type="password"
+                  value={password}
                 />
               </VStack>
 
               <Box
+                _active={{ transform: 'scale(0.98)' }}
+                _hover={{ bg: '$primaryHover' }}
                 as="button"
-                type="submit"
-                disabled={loading}
-                p={3}
-                borderRadius="8px"
-                border="none"
                 bg="$primary"
+                border="none"
+                borderRadius="8px"
                 color="white"
+                cursor={loading ? 'not-allowed' : 'pointer'}
+                disabled={loading}
                 fontSize="16px"
                 fontWeight="600"
-                cursor={loading ? 'not-allowed' : 'pointer'}
                 opacity={loading ? 0.7 : 1}
+                p={3}
                 transition="all 0.2s ease"
-                _hover={{ bg: '$primaryHover' }}
-                _active={{ transform: 'scale(0.98)' }}
+                type="submit"
               >
                 {loading ? 'Signing in...' : 'Sign in'}
               </Box>
             </VStack>
           </form>
 
-          <Text typography="label" color="$textTertiary" textAlign="center">
+          <Text color="$textTertiary" textAlign="center" typography="label">
             Use superadmin credentials to sign in
           </Text>
         </VStack>
