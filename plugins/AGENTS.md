@@ -47,7 +47,7 @@ my-plugin/
 │   ├── lib.rs               # yeollin_plugin! macro
 │   └── routes/              # Vespera route handlers
 ├── app/
-│   └── (group)/             # Next.js route group
+│   └── (group)/             # App Router route group
 │       └── page.tsx         # Frontend pages
 ├── package.json             # devDeps for TypeScript DX
 └── tsconfig.json            # Extends packages/app/tsconfig.json
@@ -65,7 +65,7 @@ my-plugin/
 ## TYPESCRIPT SETUP
 
 Each plugin has `tsconfig.json` extending `packages/app/tsconfig.json`:
-- IDE gets full type support for React, Next.js, @devup-ui/react
+- IDE gets full type support for React, vinext's Next-compatible APIs, @devup-ui/react
 - `@/*` paths resolve to `packages/app/src/*`
 - devDependencies in package.json provide types locally
 - Run `bun run typecheck` to verify types
