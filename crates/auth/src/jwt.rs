@@ -69,8 +69,10 @@ pub fn generate_token(
 
 /// Verify and decode a JWT token
 pub fn verify_token(config: &AuthConfig, token: &str) -> Result<Claims, AuthError> {
-    let mut validation = Validation::default();
-    validation.validate_exp = true;
+    let validation = Validation {
+        validate_exp: true,
+        ..Validation::default()
+    };
 
     let token_data = decode::<Claims>(
         token,
