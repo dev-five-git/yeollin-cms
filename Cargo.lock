@@ -4484,9 +4484,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vespera"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04bccabe726b24f7ed48e908acfacaf8aafc9147309ca4831f4d1c1c50c4eac3"
+checksum = "649c5c570c48197bfc903358cdc983b86e2da2dae9d4db95a5ff6845fb14f616"
 dependencies = [
  "axum",
  "axum-extra",
@@ -4505,9 +4505,9 @@ dependencies = [
 
 [[package]]
 name = "vespera_core"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db772c9b579b6ec5f67a6b4a061f8a896fea32f43d93bc966789b4841da774e0"
+checksum = "d6dfc2c8b3135cc6909b0986257d8803435559363277de7d5c1d2922b635041a"
 dependencies = [
  "serde",
  "serde_json",
@@ -4515,9 +4515,9 @@ dependencies = [
 
 [[package]]
 name = "vespera_inprocess"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d63a9b7c8dd2a9ebbad981350032bccc8681448b232ecd711543c7222a581d21"
+checksum = "335c6bc658d69c630030186f5d1ff02a998fb1509d571c059e9170031984b71e"
 dependencies = [
  "arc-swap",
  "axum",
@@ -4533,9 +4533,9 @@ dependencies = [
 
 [[package]]
 name = "vespera_jni"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d065631abf6290967c9f8ae7fcb03a812ce4383a87d223f7c3299307651e8997"
+checksum = "49c855c7014d325091045ccab93f7749a0a60b7919a14a13c0fa02bcba5c40f8"
 dependencies = [
  "futures-util",
  "jni",
@@ -4546,9 +4546,9 @@ dependencies = [
 
 [[package]]
 name = "vespera_macro"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e08b2d68f209bed689755fa0e670ea52f65e7e3a1f26353eba0ddbb64311d31"
+checksum = "abcaf690fa7de4cd05269497536eca66ca98c3803ca2ca484f7ce212649b0147"
 dependencies = [
  "proc-macro2",
  "quote",
