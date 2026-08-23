@@ -1,6 +1,6 @@
-//! Development proxy for forwarding requests to Next.js dev server
+//! Development proxy for forwarding requests to the vinext dev server
 //!
-//! In development mode, this module proxies non-API requests to the Next.js dev server
+//! In development mode, this module proxies non-API requests to the vinext dev server
 //! running on a separate port, allowing a single entry point for the CMS.
 //!
 //! Supports both HTTP and WebSocket (for HMR) proxying.
@@ -20,7 +20,21 @@ use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_tungstenite::{connect_async, tungstenite::Message as TungMessage};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{
+        client::IntoClientRequest,
+        http::{
+            header::SEC_WEBSOCKET_PROTOCOL as TUNG_SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue as TungHeaderValue,
+        },
+        Message as TungMessage,
+    },
+};
+
+const VITE_HMR_PATH: &str = "/__vite_hmr";
+const VITE_HMR_PROTOCOL: &str = "vite-hmr";
+const VITE_PING_PROTOCOL: &str = "vite-ping";
 
 /// Shared state for dev proxy
 #[derive(Clone)]
@@ -44,16 +58,12 @@ impl DevProxyState {
     }
 }
 
-/// Create a router that proxies all requests to the Next.js dev server
+/// Create a router that proxies all requests to the vinext dev server
 pub fn dev_proxy_router(target_port: u16) -> Router {
     let state = Arc::new(DevProxyState::new(target_port));
 
     Router::new()
-        // WebSocket routes for HMR
-        // Turbopack (Next.js 16 default) uses /_next/hmr; webpack uses /_next/webpack-hmr
-        .route("/_next/hmr", get(websocket_handler))
-        .route("/_next/webpack-hmr", get(websocket_handler))
-        .route("/__nextjs_original-stack-frames", get(websocket_handler))
+        .route(VITE_HMR_PATH, get(websocket_handler))
         // HTTP fallback for everything else
         .fallback(http_proxy_handler)
         .with_state(state)
@@ -73,9 +83,28 @@ async fn websocket_handler(
         .unwrap_or_default();
 
     let ws_url = format!("{}{}{}", state.target_ws_url, path, query);
-    tracing::debug!("WebSocket proxy: {}", ws_url);
+    let protocol = vite_websocket_protocol(
+        req.headers()
+            .get(header::SEC_WEBSOCKET_PROTOCOL)
+            .and_then(|value| value.to_str().ok()),
+    );
+    tracing::debug!("Vite HMR WebSocket proxy: {} ({})", ws_url, protocol);
 
-    ws.on_upgrade(move |socket| handle_websocket(socket, ws_url))
+    ws.protocols([VITE_HMR_PROTOCOL, VITE_PING_PROTOCOL])
+        .on_upgrade(move |socket| handle_websocket(socket, ws_url, protocol))
+}
+
+fn vite_websocket_protocol(requested: Option<&str>) -> &'static str {
+    requested
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .find_map(|protocol| match protocol {
+            VITE_HMR_PROTOCOL => Some(VITE_HMR_PROTOCOL),
+            VITE_PING_PROTOCOL => Some(VITE_PING_PROTOCOL),
+            _ => None,
+        })
+        .unwrap_or(VITE_HMR_PROTOCOL)
 }
 
 /// HTTP proxy handler
@@ -106,7 +135,7 @@ async fn http_proxy_handler(
         }
     };
 
-    // Send request with retry for connection errors (Next.js might be restarting)
+    // Send request with retry for connection errors (vinext might be restarting)
     let mut last_error = None;
     for attempt in 0..3 {
         if attempt > 0 {
@@ -194,9 +223,24 @@ async fn http_proxy_handler(
 }
 
 /// Handle WebSocket proxy connection
-async fn handle_websocket(client_socket: WebSocket, target_url: String) {
-    // Connect to Next.js WebSocket
-    let ws_stream = match connect_async(&target_url).await {
+async fn handle_websocket(client_socket: WebSocket, target_url: String, protocol: &'static str) {
+    let mut request = match target_url.as_str().into_client_request() {
+        Ok(request) => request,
+        Err(e) => {
+            tracing::error!(
+                "Failed to create WebSocket request for {}: {}",
+                target_url,
+                e
+            );
+            return;
+        }
+    };
+    request.headers_mut().insert(
+        TUNG_SEC_WEBSOCKET_PROTOCOL,
+        TungHeaderValue::from_static(protocol),
+    );
+
+    let ws_stream = match connect_async(request).await {
         Ok((stream, _)) => stream,
         Err(e) => {
             tracing::error!(
@@ -281,5 +325,20 @@ fn tungstenite_to_axum(msg: TungMessage) -> Option<Message> {
         TungMessage::Pong(data) => Some(Message::Pong(data.to_vec().into())),
         TungMessage::Close(_) => Some(Message::Close(None)),
         TungMessage::Frame(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selects_vite_hmr_protocol() {
+        assert_eq!(vite_websocket_protocol(Some("vite-hmr")), VITE_HMR_PROTOCOL);
+        assert_eq!(
+            vite_websocket_protocol(Some("unknown, vite-ping")),
+            VITE_PING_PROTOCOL
+        );
+        assert_eq!(vite_websocket_protocol(None), VITE_HMR_PROTOCOL);
     }
 }

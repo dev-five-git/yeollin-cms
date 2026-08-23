@@ -69,8 +69,8 @@ pub async fn auth_middleware(
 ) -> Response {
     let path = request.uri().path().to_string();
 
-    // Static assets don't need auth
-    if path.starts_with("/_next/") || path.starts_with("/static/") || path.ends_with(".ico") {
+    // Frontend assets don't need auth
+    if is_frontend_asset(&path) {
         return next.run(request).await;
     }
 
@@ -106,6 +106,20 @@ pub async fn auth_middleware(
         }
         None => unauthorized_response(&state.config, &path),
     }
+}
+
+fn is_frontend_asset(path: &str) -> bool {
+    const ASSET_PREFIXES: &[&str] = &[
+        "/_next/",
+        "/static/",
+        "/@",
+        "/__vite_hmr",
+        "/node_modules/",
+        "/src/",
+        "/df/",
+    ];
+
+    path.ends_with(".ico") || ASSET_PREFIXES.iter().any(|prefix| path.starts_with(prefix))
 }
 
 /// Extract token from request (header or cookie)
@@ -164,5 +178,33 @@ fn guest_redirect(config: &AuthConfig, path: &str) -> Response {
             .into_response()
     } else {
         Redirect::temporary(&config.dashboard_redirect).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_frontend_asset;
+
+    #[test]
+    fn allows_vite_and_static_asset_paths() {
+        for path in [
+            "/_next/static/chunk.js",
+            "/@id/virtual:vite-rsc/entry-browser",
+            "/@vite/client",
+            "/__vite_hmr",
+            "/node_modules/vinext/dist/client.js",
+            "/src/app/page.tsx",
+            "/df/index.ts",
+            "/favicon.ico",
+        ] {
+            assert!(is_frontend_asset(path), "expected asset path: {path}");
+        }
+    }
+
+    #[test]
+    fn keeps_application_routes_protected() {
+        for path in ["/", "/signin", "/example-plugin", "/api/menus"] {
+            assert!(!is_frontend_asset(path), "expected application path: {path}");
+        }
     }
 }

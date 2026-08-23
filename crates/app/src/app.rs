@@ -199,7 +199,7 @@ impl YeollinAppBuilder {
         self
     }
 
-    /// Set the static files directory (embedded Next.js output)
+    /// Set the static files directory (embedded vinext output)
     ///
     /// When set, the server will serve static files from this directory
     /// as a fallback for routes not matched by API endpoints.
@@ -222,14 +222,14 @@ impl YeollinAppBuilder {
 
     /// Set the dev proxy port (for development mode)
     ///
-    /// When set, the server will proxy non-API requests to the Next.js dev server
+    /// When set, the server will proxy non-API requests to the vinext dev server
     /// running on the specified port. This is mutually exclusive with `with_static`.
     ///
     /// # Example
     ///
     /// ```rust,ignore
     /// let app = yeollin::app()
-    ///     .with_dev_proxy(3000)  // Proxy to Next.js dev server on port 3000
+    ///     .with_dev_proxy(3000)  // Proxy to vinext dev server on port 3000
     ///     .build();
     /// ```
     pub fn with_dev_proxy(mut self, port: u16) -> Self {
