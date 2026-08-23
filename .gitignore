@@ -31,11 +31,20 @@ yarn-error.log*
 # Test
 coverage/
 
-# Generated
+# Generated (Cargo.lock and bun.lock are tracked for apps)
 df/
 openapi.json
-
-# Rust build artifacts only (Cargo.lock is tracked for apps)
-
 .yeollin/
 tsconfig.tsbuildinfo
+
+# Local databases (schema is provisioned by vespertide on startup)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Agent / tooling local state
+.claude/
+.codegraph/
+.omo/
+.playwright-mcp/
