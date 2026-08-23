@@ -101,28 +101,50 @@ pub async fn get_binary_name(crate_dir: &Path) -> Result<String> {
     Ok("yeollin-app".to_string())
 }
 
-/// Find binary path for the crate
-pub async fn find_binary_path(crate_dir: &Path) -> Result<std::path::PathBuf> {
-    let binary_name = get_binary_name(crate_dir).await?;
+/// Resolve the Cargo target directory for a crate.
+///
+/// Asks Cargo instead of assuming `<workspace>/target`, so that a
+/// `CARGO_TARGET_DIR` env var or a `build.target-dir` override in any
+/// `.cargo/config.toml` (user-global or project-local) is honored.
+async fn find_target_dir(crate_dir: &Path) -> Result<PathBuf> {
+    let output = Command::new("cargo")
+        .current_dir(crate_dir)
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+        .context("Failed to run `cargo metadata`")?;
 
-    // Find workspace root to locate target/debug
-    let mut workspace_root = crate_dir.to_path_buf();
-    while !workspace_root.join("target").exists() {
-        if !workspace_root.pop() {
-            anyhow::bail!("Could not find workspace root with target directory");
-        }
+    if !output.status.success() {
+        anyhow::bail!(
+            "`cargo metadata` failed in {}: {}",
+            crate_dir.display(),
+            output.status
+        );
     }
 
-    #[cfg(windows)]
-    let binary_path = workspace_root
-        .join("target")
-        .join("debug")
-        .join(format!("{}.exe", binary_name));
-    #[cfg(not(windows))]
-    let binary_path = workspace_root
-        .join("target")
-        .join("debug")
-        .join(&binary_name);
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("Failed to parse `cargo metadata` output")?;
+
+    metadata
+        .get("target_directory")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
+        .context("`cargo metadata` did not report a target_directory")
+}
+
+/// Find binary path for the crate
+pub async fn find_binary_path(crate_dir: &Path) -> Result<PathBuf> {
+    let binary_name = get_binary_name(crate_dir).await?;
+    let target_dir = find_target_dir(crate_dir).await?;
+
+    let file_name = if cfg!(windows) {
+        format!("{binary_name}.exe")
+    } else {
+        binary_name
+    };
+    let binary_path = target_dir.join("debug").join(file_name);
 
     if !binary_path.exists() {
         anyhow::bail!("Binary not found: {}", binary_path.display());
