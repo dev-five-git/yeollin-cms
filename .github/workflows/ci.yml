@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/*.md'
+      - LICENSE
+      - '**/.gitignore'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Check
+    # Self-hosted Linux. The repository is private, so there is no fork-PR
+    # code-execution exposure. Kept as a single job because the runner pool is
+    # one machine -- separate jobs would serialise anyway and pay checkout and
+    # toolchain setup costs repeatedly.
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # oxlint loads oxlint.config.ts through Node, not Bun.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: latest
+
+      - name: Install node dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: |
+          for pkg in packages/app apps/example-app plugins/example-plugin plugins/example-memo-plugin; do
+            echo "::group::tsc $pkg"
+            (cd "$pkg" && bun x tsc --noEmit)
+            echo "::endgroup::"
+          done
+
+      # Exercises prebuild (template extraction, plugin frontend assembly,
+      # menus/plugins manifests) and the Next.js static export. The release
+      # binary is only built on main -- on PRs `cargo clippy --all-targets`
+      # already type-checks every crate, and a release rebuild costs far more
+      # than it catches.
+      - name: Build frontend
+        working-directory: apps/example-app
+        run: cargo run -p yeollin-cli -- build --skip-backend
+
+      - name: Build release binary
+        if: github.ref == 'refs/heads/main'
+        run: cargo build --release -p example-app
