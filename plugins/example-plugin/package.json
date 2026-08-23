@@ -8,13 +8,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "dayjs": "^1.11.19"
+    "dayjs": "^1.11.23"
   },
   "devDependencies": {
     "@devup-ui/react": "^1.0",
     "@types/react": "^19",
     "react": "^19",
     "next": "^16",
-    "typescript": "^5.9"
+    "typescript": "^7.0"
   }
 }
