@@ -1,16 +1,18 @@
 //! Build command
 //!
-//! Runs prebuild, then builds Next.js for static export and Rust binary.
+//! Runs prebuild, then builds vinext for static export and the Rust binary.
 //! Expects to be run from a directory containing api/ and/or app/ subdirectories.
 
 use anyhow::{Context, Result};
 use clap::Args;
 use std::process::Stdio;
-use tokio::process::Command;
+use tokio::{fs, process::Command};
 use tracing::{debug, info};
 
+use super::bun_command;
 use super::prebuild::{
-    detect_crate_dir, detect_current_app, export_from_binary, find_binary_path, run_prebuild,
+    copy_dir_contents_parallel, detect_crate_dir, detect_current_app, export_from_binary,
+    find_binary_path, run_prebuild,
 };
 
 #[derive(Args)]
@@ -114,7 +116,7 @@ pub async fn run(args: BuildArgs) -> Result<()> {
     // 4. Install dependencies and build frontend
     if !args.skip_frontend && frontend.is_some() {
         info!("Installing frontend dependencies...");
-        let install_status = Command::new("bun")
+        let install_status = bun_command()
             .current_dir(&yeollin_app_dir)
             .args(["install"])
             .stdout(Stdio::inherit())
@@ -127,24 +129,52 @@ pub async fn run(args: BuildArgs) -> Result<()> {
             anyhow::bail!("bun install failed");
         }
 
-        info!("Building frontend (Next.js SSG)...");
-        let status = Command::new("bun")
+        info!("Building frontend (vinext static export)...");
+        let status = bun_command()
             .current_dir(&yeollin_app_dir)
-            .args(["run", "build"])
+            .args(["run", "--bun", "build"])
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .status()
             .await
-            .context("Failed to run next build")?;
+            .context("Failed to run vinext build")?;
 
         if !status.success() {
-            anyhow::bail!("Next.js build failed");
+            anyhow::bail!("vinext build failed");
         }
 
-        info!(
-            "Frontend build complete: {}",
-            yeollin_app_dir.join("out").display()
-        );
+        let vinext_output_dir = yeollin_app_dir.join("dist").join("client");
+        let static_output_dir = yeollin_app_dir.join("out");
+
+        if !vinext_output_dir.is_dir() {
+            anyhow::bail!(
+                "vinext client output not found: {}",
+                vinext_output_dir.display()
+            );
+        }
+
+        if static_output_dir.exists() {
+            fs::remove_dir_all(&static_output_dir)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to remove previous static output: {}",
+                        static_output_dir.display()
+                    )
+                })?;
+        }
+
+        copy_dir_contents_parallel(&vinext_output_dir, &static_output_dir)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to copy vinext client output from {} to {}",
+                    vinext_output_dir.display(),
+                    static_output_dir.display()
+                )
+            })?;
+
+        info!("Frontend build complete: {}", static_output_dir.display());
     }
 
     // 5. Build Rust binary in release mode

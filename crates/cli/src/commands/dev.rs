@@ -1,6 +1,6 @@
 //! Dev command
 //!
-//! Runs prebuild (proxy mode), then starts Next.js dev server and Rust API server.
+//! Runs prebuild (proxy mode), then starts vinext and the Rust API server.
 //! Proxy mode creates re-export files that import from the original source,
 //! enabling instant HMR. A file watcher detects new/deleted files and updates proxies,
 //! and restarts the Rust server to pick up new public routes.
@@ -15,6 +15,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, info, warn};
 
+use super::bun_command;
 use super::prebuild::{
     detect_crate_dir, detect_current_app, export_from_binary, find_binary_path, run_prebuild,
     AppFrontend,
@@ -30,7 +31,7 @@ pub struct DevArgs {
     #[arg(long, default_value = "3001")]
     pub port: u16,
 
-    /// Internal port for Next.js dev server (proxied through main port)
+    /// Internal port for the vinext dev server (proxied through main port)
     #[arg(long, default_value = "3000")]
     pub internal_frontend_port: u16,
 
@@ -134,7 +135,7 @@ pub async fn run(args: DevArgs) -> Result<()> {
     // 4. Install frontend dependencies if needed
     if frontend.is_some() && !yeollin_app_dir.join("node_modules").exists() {
         info!("Installing frontend dependencies...");
-        let install_status = Command::new("bun")
+        let install_status = bun_command()
             .current_dir(&yeollin_app_dir)
             .args(["install"])
             .stdout(Stdio::inherit())
@@ -160,13 +161,14 @@ pub async fn run(args: DevArgs) -> Result<()> {
         }
     }
 
-    // 5. Start Next.js dev server if we have frontend
-    let mut next_handle = if frontend.is_some() {
-        let mut next_cmd = Command::new("bun");
-        next_cmd
+    // 5. Start vinext dev server if we have frontend
+    let mut frontend_handle = if frontend.is_some() {
+        let mut frontend_cmd = bun_command();
+        frontend_cmd
             .current_dir(&yeollin_app_dir)
             .args([
                 "run",
+                "--bun",
                 "dev",
                 "--port",
                 &args.internal_frontend_port.to_string(),
@@ -175,14 +177,14 @@ pub async fn run(args: DevArgs) -> Result<()> {
             .stderr(Stdio::inherit())
             .kill_on_drop(true);
 
-        Some(next_cmd.spawn()?)
+        Some(frontend_cmd.spawn()?)
     } else {
         None
     };
 
-    // Wait for Next.js to be ready
-    if next_handle.is_some() {
-        info!("Waiting for Next.js to start...");
+    // Wait for vinext to be ready
+    if frontend_handle.is_some() {
+        info!("Waiting for vinext to start...");
         tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
     }
 
@@ -231,16 +233,16 @@ pub async fn run(args: DevArgs) -> Result<()> {
     // Main event loop - handle process exits and restart signals
     loop {
         tokio::select! {
-            // Handle Next.js exit
+            // Handle vinext exit
             result = async {
-                match next_handle.as_mut() {
+                match frontend_handle.as_mut() {
                     Some(h) => Some(h.wait().await),
                     None => std::future::pending().await,
                 }
             } => {
                 if let Some(Ok(status)) = result {
                     if !status.success() {
-                        tracing::error!("Next.js dev server exited with status: {}", status);
+                        tracing::error!("vinext dev server exited with status: {}", status);
                     }
                 }
                 if let Some(ref mut cargo) = cargo_handle {
@@ -261,8 +263,8 @@ pub async fn run(args: DevArgs) -> Result<()> {
                         tracing::error!("API server exited with status: {}", status);
                     }
                 }
-                if let Some(ref mut next) = next_handle {
-                    let _ = next.kill().await;
+                if let Some(ref mut frontend) = frontend_handle {
+                    let _ = frontend.kill().await;
                 }
                 break;
             }

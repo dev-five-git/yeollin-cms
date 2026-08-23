@@ -29,7 +29,7 @@ enum Commands {
     /// Prepare the frontend app by extracting template and linking plugins
     Prebuild(commands::prebuild::PrebuildArgs),
 
-    /// Start development servers (prebuild + next dev + cargo watch)
+    /// Start development servers (prebuild + vinext dev + cargo watch)
     Dev(commands::dev::DevArgs),
 
     /// Build for production (prebuild + next export + cargo build)

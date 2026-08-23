@@ -359,7 +359,7 @@ async fn copy_openapi_json(current_dir: &Path, output_dir: &Path) -> Result<()> 
         fs::copy(&api_openapi, &dest).await?;
         info!("Copied openapi.json from api/");
     } else {
-        // Create empty openapi.json placeholder so Next.js config doesn't fail
+        // Create empty openapi.json placeholder so the Devup API plugin can initialize
         let placeholder = serde_json::json!({
             "openapi": "3.1.0",
             "info": {
@@ -482,7 +482,7 @@ async fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
 }
 
 /// Link frontend using PROXY mode - creates re-export files that import from source
-/// This enables instant HMR since Next.js watches the original source files
+/// This enables instant HMR since Vite watches the original source files
 async fn link_frontend_proxy(output_dir: &Path, frontend: &AppFrontend) -> Result<()> {
     let public_dir = output_dir.join("src").join("app").join("(public)");
     let auth_dir = output_dir.join("src").join("app").join("(auth)");
@@ -845,7 +845,7 @@ async fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) ->
 }
 
 /// Copy contents of a directory to destination with parallel file copying
-async fn copy_dir_contents_parallel(src: &Path, dst: &Path) -> Result<()> {
+pub(super) async fn copy_dir_contents_parallel(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst).await?;
 
     let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
