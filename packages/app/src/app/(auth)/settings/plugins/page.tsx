@@ -1,6 +1,6 @@
 import { Box, Flex, Grid, Text, VStack } from '@devup-ui/react'
-import Link from 'next/link'
 import { readFile } from 'fs/promises'
+import Link from 'next/link'
 import path from 'path'
 
 interface PluginInfo {
@@ -28,55 +28,50 @@ interface PluginCardProps {
 function PluginCard({ plugin }: PluginCardProps) {
   return (
     <Box
-      bg="$background"
-      p={5}
-      borderRadius="12px"
-      border="1px solid $border"
-      transition="all 0.2s ease"
       _hover={{ borderColor: '$primary' }}
+      bg="$background"
+      border="1px solid $border"
+      borderRadius="12px"
+      p={5}
+      transition="all 0.2s ease"
     >
-      <Flex justifyContent="space-between" alignItems="flex-start" mb={3}>
+      <Flex alignItems="flex-start" justifyContent="space-between" mb={3}>
         <Flex alignItems="center" gap={3}>
           <Box
-            w="48px"
-            h="48px"
-            borderRadius="10px"
-            bg="$primaryLight"
-            display="flex"
             alignItems="center"
-            justifyContent="center"
+            bg="$primaryLight"
+            borderRadius="10px"
+            display="flex"
             fontSize="24px"
+            h="48px"
+            justifyContent="center"
+            w="48px"
           >
             🧩
           </Box>
           <VStack alignItems="flex-start" gap={1}>
-            <Text typography="subheading" color="$text">
+            <Text color="$text" typography="subheading">
               {plugin.name}
             </Text>
             {plugin.author ? (
-              <Text typography="label" color="$textSecondary">
+              <Text color="$textSecondary" typography="label">
                 by {plugin.author}
               </Text>
             ) : null}
           </VStack>
         </Flex>
-        <Box
-          bg="$backgroundSecondary"
-          px={2}
-          py={1}
-          borderRadius="6px"
-        >
-          <Text typography="label" color="$textSecondary">
+        <Box bg="$backgroundSecondary" borderRadius="6px" px={2} py={1}>
+          <Text color="$textSecondary" typography="label">
             v{plugin.version}
           </Text>
         </Box>
       </Flex>
       {plugin.description ? (
-        <Text typography="body" color="$textSecondary">
+        <Text color="$textSecondary" typography="body">
           {plugin.description}
         </Text>
       ) : (
-        <Text typography="body" color="$textTertiary" fontStyle="italic">
+        <Text color="$textTertiary" fontStyle="italic" typography="body">
           No description provided
         </Text>
       )}
@@ -93,23 +88,23 @@ export default async function PluginsPage() {
         <Flex alignItems="center" gap={4}>
           <Link href="/settings" style={{ textDecoration: 'none' }}>
             <Text
-              typography="body"
-              color="$textSecondary"
               _hover={{ color: '$primary' }}
+              color="$textSecondary"
               cursor="pointer"
+              typography="body"
             >
               Settings
             </Text>
           </Link>
           <Text color="$textTertiary">/</Text>
-          <Text typography="body" color="$text">
+          <Text color="$text" typography="body">
             Plugins
           </Text>
         </Flex>
 
         <VStack alignItems="flex-start" gap={2}>
           <Text typography="heading">Installed Plugins</Text>
-          <Text typography="body" color="$textSecondary">
+          <Text color="$textSecondary" typography="body">
             {plugins.length} plugin{plugins.length !== 1 ? 's' : ''} installed
           </Text>
         </VStack>
@@ -117,25 +112,21 @@ export default async function PluginsPage() {
         {plugins.length === 0 ? (
           <Box
             bg="$background"
-            p={8}
-            borderRadius="12px"
             border="1px solid $border"
-            w="100%"
+            borderRadius="12px"
+            p={8}
             textAlign="center"
+            w="100%"
           >
-            <Text typography="subheading" color="$textSecondary" mb={2}>
+            <Text color="$textSecondary" mb={2} typography="subheading">
               No plugins installed
             </Text>
-            <Text typography="body" color="$textTertiary">
+            <Text color="$textTertiary" typography="body">
               Plugins extend the functionality of your CMS
             </Text>
           </Box>
         ) : (
-          <Grid
-            columns={['1fr', '1fr', '1fr 1fr']}
-            gap={4}
-            w="100%"
-          >
+          <Grid columns={['1fr', null, '1fr 1fr']} gap={4} w="100%">
             {plugins.map((plugin) => (
               <PluginCard key={plugin.name} plugin={plugin} />
             ))}
