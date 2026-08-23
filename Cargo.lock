@@ -114,6 +114,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "argon2"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2224,6 +2233,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
+name = "libmimalloc-sys"
+version = "0.1.49"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a45a52f43e1c16f667ccfe4dd8c85b7f7c204fd5e3bf46c5b0db9a5c3c0b8e9"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "libsqlite3-sys"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2316,6 +2334,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "mimalloc"
+version = "0.1.52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d4139bb28d14ad1facf21d5eb8825051b326e172d216b39f6d31df53cc97862"
+dependencies = [
+ "libmimalloc-sys",
 ]
 
 [[package]]
@@ -4457,44 +4484,78 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vespera"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56108dc3e56c25b626c712d0b204b4bc98e1c88bfe8d3c87c9a7975f6328938d"
+checksum = "04bccabe726b24f7ed48e908acfacaf8aafc9147309ca4831f4d1c1c50c4eac3"
 dependencies = [
  "axum",
  "axum-extra",
  "chrono",
  "garde",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "tower-layer",
  "tower-service",
  "vespera_core",
+ "vespera_jni",
  "vespera_macro",
 ]
 
 [[package]]
 name = "vespera_core"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a24867d511afab90f471dfc447baae88cabe6109d720b511e7b83cee300f4640"
+checksum = "db772c9b579b6ec5f67a6b4a061f8a896fea32f43d93bc966789b4841da774e0"
 dependencies = [
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "vespera_macro"
-version = "0.2.0"
+name = "vespera_inprocess"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9f9160b54f390e6f99c744597cdc403e8cc19c445f3ad1df74883c723280689"
+checksum = "d63a9b7c8dd2a9ebbad981350032bccc8681448b232ecd711543c7222a581d21"
+dependencies = [
+ "arc-swap",
+ "axum",
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "vespera_jni"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d065631abf6290967c9f8ae7fcb03a812ce4383a87d223f7c3299307651e8997"
+dependencies = [
+ "futures-util",
+ "jni",
+ "mimalloc",
+ "tokio",
+ "vespera_inprocess",
+]
+
+[[package]]
+name = "vespera_macro"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e08b2d68f209bed689755fa0e670ea52f65e7e3a1f26353eba0ddbb64311d31"
 dependencies = [
  "proc-macro2",
  "quote",
+ "regex-syntax",
  "serde",
  "serde_json",
- "syn 2.0.119",
+ "syn 3.0.3",
  "vespera_core",
 ]
 

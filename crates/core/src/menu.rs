@@ -20,7 +20,9 @@ pub struct MenuItem {
     #[serde(default)]
     pub order: i32,
     /// Child menu items
+    // vespera 0.3 cannot infer an OpenAPI default for `Vec`, so state it explicitly.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(default = "[]")]
     pub children: Vec<MenuItem>,
 }
 
