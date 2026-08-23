@@ -26,7 +26,7 @@ export default function ItemsPage() {
 
   return (
     <Box p={6}>
-      <Flex justifyContent="space-between" alignItems="center" mb={4}>
+      <Flex alignItems="center" justifyContent="space-between" mb={4}>
         <Text typography="heading">Items</Text>
       </Flex>
 
@@ -34,15 +34,15 @@ export default function ItemsPage() {
         {items.map((item) => (
           <Box
             key={item.id}
-            bg="$background"
-            p={4}
-            borderRadius="8px"
-            border="1px solid $border"
             _hover={{ borderColor: '$primary' }}
+            bg="$background"
+            border="1px solid $border"
+            borderRadius="8px"
+            p={4}
           >
-            <Flex justifyContent="space-between" alignItems="flex-start">
+            <Flex alignItems="flex-start" justifyContent="space-between">
               <Box>
-                <Text typography="subheading" mb={1}>
+                <Text mb={1} typography="subheading">
                   {item.name}
                 </Text>
                 {item.description && (
