@@ -13,7 +13,7 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
-    "plugins": [{ "name": "next" }],
+    "types": ["vinext/types", "vinext/types/augmentations"],
     "paths": {
       "@/*": ["./app/*"]
     }

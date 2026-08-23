@@ -1,6 +1,6 @@
 # Yeollin CMS Architecture
 
-Rust + Next.js plugin-based CMS framework. Plugins bundle API routes and frontend
+Rust + vinext plugin-based CMS framework. Plugins bundle API routes and frontend
 pages in a single crate; `yeollin-cli` assembles them into one binary that serves
 both the API and the statically exported frontend.
 
@@ -23,7 +23,7 @@ flowchart TB
         appLib["yeollin-app<br/>(YeollinApp, YeollinAppBuilder)"]
     end
 
-    subgraph Plugins["🧩 Plugins (Rust Crate + Next.js)"]
+    subgraph Plugins["🧩 Plugins (Rust Crate + vinext)"]
         direction TB
         subgraph P1["example-plugin"]
             p1routes["API Routes<br/>/api/example/*"]
@@ -39,7 +39,7 @@ flowchart TB
 
     subgraph Frontend["⚛️ Frontend (packages/app)"]
         direction TB
-        nextjs["Next.js 16 + React 19"]
+        vinext["vinext + Vite 8 + React 19"]
         devupui["@devup-ui/react"]
         devupapi["@devup-api/fetch"]
         rq["@tanstack/react-query"]
@@ -77,21 +77,21 @@ flowchart TB
 
     %% CLI flow
     prebuild -->|"assemble plugins frontend"| dotYeollin
-    dotYeollin -->|"next build + export"| binary
+    dotYeollin -->|"vinext build + static client copy"| binary
     appLib -->|"cargo build --release"| binary
 
     %% Frontend composition
-    devupui --> nextjs
-    devupapi --> nextjs
-    rq --> nextjs
-    nextjs --> dotYeollin
+    devupui --> vinext
+    devupapi --> vinext
+    rq --> vinext
+    vinext --> dotYeollin
 
     %% Runtime composition
     appLib --> axum
     axum --> Services
 
     %% Dev mode
-    dev -->|"single port :3001, proxies to Next :3000"| axum
+    dev -->|"single port :3001, proxies to vinext :3000"| axum
 
     classDef rust fill:#b7410e,stroke:#ff6633,color:#fff
     classDef node fill:#215732,stroke:#3fb950,color:#fff
@@ -100,7 +100,7 @@ flowchart TB
     classDef runtime fill:#5c3a1a,stroke:#d29922,color:#fff
 
     class core,auth,pluginLib,macros,appLib rust
-    class nextjs,devupui,devupapi,rq node
+    class vinext,devupui,devupapi,rq node
     class init,prebuild,dev,build cli
     class dotYeollin,binary output
     class axum,jwtS,staticS,openapiS,dbS,menuS runtime
@@ -112,11 +112,12 @@ flowchart TB
    `YEOLLIN_EXPORT_PLUGINS` / `YEOLLIN_EXPORT_MENUS`.
 2. `yeollin prebuild` — extracts the `packages/app` template into `.yeollin/app/`,
    copies each plugin's `app/` pages in, and writes `menus.json` / `plugins.json`.
-3. `next build` — static export to `.yeollin/app/out/`.
+3. `vinext build` — static export to `.yeollin/app/dist/client/`, then the CLI
+   copies the client output to `.yeollin/app/out/`.
 4. `cargo build --release` — final binary, embedding static files via `include_dir!`.
 
 ## Dev mode
 
 `yeollin dev` serves everything on a single port (3001). The Axum router handles
-API routes and proxies everything else to the internal Next.js dev server on 3000,
-including the Turbopack HMR WebSocket at `/_next/hmr`.
+API routes and proxies everything else to the internal vinext dev server on 3000,
+including the Vite HMR WebSocket at `/__vite_hmr`.

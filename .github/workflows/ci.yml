@@ -62,7 +62,7 @@ jobs:
           done
 
       # Exercises prebuild (template extraction, plugin frontend assembly,
-      # menus/plugins manifests) and the Next.js static export. The release
+      # menus/plugins manifests) and the vinext static export. The release
       # binary is only built on main -- on PRs `cargo clippy --all-targets`
       # already type-checks every crate, and a release rebuild costs far more
       # than it catches.

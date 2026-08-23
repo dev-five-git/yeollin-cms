@@ -21,8 +21,9 @@
     "check": "cargo check --workspace"
   },
   "devDependencies": {
-    "typescript": "^7.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "eslint-plugin-devup": "^2.1",
     "oxlint": "^1.79",
-    "eslint-plugin-devup": "^2.1"
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
   }
 }

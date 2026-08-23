@@ -17,10 +17,9 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
+    "types": [
+      "vinext/types",
+      "vinext/types/augmentations"
     ],
     "paths": {
       "@/*": [
@@ -29,12 +28,10 @@
     }
   },
   "include": [
-    "next-env.d.ts",
+    "vite-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    ".next/types/**/*.ts",
-    "df/**/*.d.ts",
-    ".next/dev/types/**/*.ts"
+    "df/**/*.d.ts"
   ],
   "exclude": [
     "node_modules"

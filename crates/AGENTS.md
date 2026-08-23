@@ -67,7 +67,7 @@ fn detect_crate_dir(base: &Path) -> Option<PathBuf> {
 | Command | Purpose |
 |---------|---------|
 | `prebuild` | Extract template, link plugins, generate manifests |
-| `dev` | Build → prebuild → run Next.js + API (single port) |
+| `dev` | Build → prebuild → run vinext + API (single port) |
 | `build` | Full production build (frontend + backend) |
 
 ## APP/PLUGIN STRUCTURE

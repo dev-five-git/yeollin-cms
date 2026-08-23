@@ -1,7 +1,7 @@
-//! Static file serving for embedded Next.js output
+//! Static file serving for embedded vinext output
 //!
 //! This module provides utilities to serve embedded static files from
-//! a Next.js static export (`out/` directory).
+//! a vinext static export (`out/` directory).
 
 use axum::{
     body::Body,
@@ -41,14 +41,14 @@ fn serve_static_file(dir: &'static Dir<'static>, path: &str) -> impl IntoRespons
         return response;
     }
 
-    // Handle Next.js RSC path encoding: dots become slashes in __next.* paths
+    // Handle legacy Next-compatible RSC path encoding used by static exports
     // URL: example-plugin/settings/__next.!KHBsdWdpbnMp.example-plugin.!KGV4YW1wbGUp.txt
     // File: example-plugin/settings/__next.!KHBsdWdpbnMp/example-plugin/!KGV4YW1wbGUp.txt
     if let Some(response) = try_serve_rsc_file(dir, path) {
         return response;
     }
 
-    // Try with .html extension (for Next.js static routes)
+    // Try with .html extension for static routes
     let html_path = format!("{}.html", path);
     if let Some(response) = try_serve_file(dir, &html_path) {
         return response;
@@ -73,7 +73,7 @@ fn serve_static_file(dir: &'static Dir<'static>, path: &str) -> impl IntoRespons
     (StatusCode::NOT_FOUND, "Not Found").into_response()
 }
 
-/// Try to serve a Next.js RSC file with path encoding conversion
+/// Try to serve a legacy Next-compatible RSC file with path encoding conversion
 /// Converts dots to slashes in __next.* file paths
 fn try_serve_rsc_file(dir: &'static Dir<'static>, path: &str) -> Option<Response<Body>> {
     // Find __next. segment in the path
@@ -146,6 +146,7 @@ fn guess_content_type(path: &str) -> &'static str {
         "webp" => "image/webp",
         "avif" => "image/avif",
         "txt" => "text/plain; charset=utf-8",
+        "rsc" => "text/x-component; charset=utf-8",
         "xml" => "application/xml; charset=utf-8",
         "wasm" => "application/wasm",
         _ => "application/octet-stream",
@@ -169,5 +170,9 @@ mod tests {
             "application/json; charset=utf-8"
         );
         assert_eq!(guess_content_type("image.png"), "image/png");
+        assert_eq!(
+            guess_content_type("index.rsc"),
+            "text/x-component; charset=utf-8"
+        );
     }
 }
