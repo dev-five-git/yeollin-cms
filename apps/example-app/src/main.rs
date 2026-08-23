@@ -40,7 +40,9 @@ async fn main() -> anyhow::Result<()> {
     let auth_config =
         AuthConfig::new(jwt_secret).superadmin(superadmin_username.clone(), superadmin_password);
 
-    let db = Database::connect("sqlite://./db.sqlite").await?;
+    // `mode=rwc` creates the file on first run; vespertide provisions the schema
+    // on plugin init, so the database is not checked into version control.
+    let db = Database::connect("sqlite://./db.sqlite?mode=rwc").await?;
 
     tracing::info!(username = %superadmin_username, "Superadmin configured");
 
