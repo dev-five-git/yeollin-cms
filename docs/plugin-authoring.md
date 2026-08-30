@@ -345,6 +345,43 @@ Content may store media references such as
 the field type and store that reference, not `/api/media/file?...`, an original
 filename, or a runtime storage path.
 
+### Full-text content search
+
+The `search` plugin provides ranked content search without an external service.
+It requires SQLite with FTS5 enabled, creates its ordinary projection table and
+FTS5 virtual table during plugin initialization, and backfills every existing
+content entry on startup. Content is the first indexed subject; each result
+therefore carries `subject: "content"`, the collection and content ID, status,
+updated time, and the collection editor URL.
+
+The searchable document contains the title with a higher ranking weight, plus
+the collection, slug, author, and every scalar value recursively found in the
+typed `fields` JSON. Object keys and null values are not indexed. Draft and
+published entries both belong to the administrator index, so the search handler
+calls `require_role("admin")` and the frontend handles a bare 403.
+
+Create, update, publish, unpublish, and delete are applied by an Inline
+subscriber using the same `DatabaseTransaction` as the content write. If the
+projection or FTS trigger fails, the content write and its event roll back too.
+The startup synchronization repairs a missing initial projection when `search`
+is installed after content already exists.
+
+`GET /api/search` accepts these query parameters:
+
+| Parameter | Meaning |
+|-----------|---------|
+| `q` | Required search text, at most 200 characters and 12 alphanumeric terms. |
+| `page`, `pageSize` | Pagination; page size is clamped to 1–50. |
+| `collection` | Optional exact lowercase kebab-case collection name. |
+| `status` | Optional exact `draft` or `published` filter. |
+
+Punctuation in `q` becomes a separator, while word-like FTS operators are quoted
+as literal terms instead of syntax. Every term becomes a quoted prefix and terms
+are combined with `AND`, so `launch check` safely matches documents containing
+prefixes of both words. The API returns title-weighted relevance order and a
+plain-text FTS snippet; clients must still render all returned content as text
+rather than trusted HTML.
+
 ## Typed events and subscribers
 
 An event is a serializable Rust type with one stable name. The action and event

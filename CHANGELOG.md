@@ -9,6 +9,7 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Security
 
+- Full-text search is administrator-only because its index includes drafts. User input is converted to bounded, quoted alphanumeric prefix terms instead of being passed through as raw FTS5 syntax.
 - Webhook delivery signs the exact event envelope with HMAC-SHA256, disables redirects, enforces a per-request timeout, and blocks private, loopback, link-local, unspecified, multicast, and IPv6 unique-local destinations by default. Validated DNS answers are pinned to prevent rebinding; private-network delivery requires an explicit per-endpoint opt-out.
 - Authentication middleware no longer exempts any path ending in `.ico`. Only exact-match files such as `/favicon.ico` are exempt.
 - Vite dev-server asset paths (`/@`, `/__vite_hmr`, `/node_modules/`, `/src/`, `/df/`) now skip authentication only while the dev proxy is active.
@@ -22,6 +23,8 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Added
 
+- The `search` plugin adds an administrator search page and paginated `/api/search` endpoint backed by SQLite FTS5. Content titles receive higher relevance weight than recursively flattened scalar fields, with exact collection and publication-status filters.
+- Search startup backfills existing content and rebuilds its external-content FTS5 index. An Inline subscriber applies create, update, publish, unpublish, and delete projections in the content transaction, so index failures roll back the source write rather than creating drift.
 - The `webhooks` plugin adds administrator endpoint CRUD, write-only signing secrets, exact event-name filters, per-endpoint delivery history, five-attempt dead letters, and explicit manual retries. Successful endpoints are not resent when another endpoint fails.
 - Compile-time typed content collections through `yeollin_content_collection!` and the `collections` plugin declaration. Collection field types drive concrete handlers, validation, exported schemas, and generated editor pages while the framework owns IDs, collection-scoped slugs, author, and timestamps.
 - A shared draft/published content repository with paginated administrator CRUD, transactional `content.created` / `updated` / `published` / `unpublished` / `deleted` audit events, and an exact public-by-slug endpoint that exposes only published entries. The reference `content` plugin ships a typed `pages` collection with media-reference validation.
@@ -49,6 +52,7 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Fixed
 
+- The authenticated application shell now changes its sidebar into a horizontally scrollable top navigation on narrow screens, keeping plugin pages usable without horizontal page overflow.
 - Plugin `dependencies` from `package.json` are merged into the generated frontend. Previously only the host application's were, so a plugin's JavaScript dependency was never installed and its pages resolved against whatever the workspace happened to hoist. Conflicting requirements now fail the build instead of resolving silently; `devDependencies` stay local to each crate.
 - `api_base` on `yeollin_plugin!` for plugins whose URL namespace should differ from their name. It must not contain `api`, which is always prepended.
 - `route-manifest.json` generated at prebuild alongside `menus.json` and `plugins.json`.
