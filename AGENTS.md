@@ -87,6 +87,11 @@ yeollin_plugin::yeollin_plugin! {
 - **Routes**: Vespera macros `#[vespera::route(get, path = "...", tags = ["..."])]`
 - **State**: Extension layer for SharedMenus, SharedPlugins
 - **Logs go to stderr**: stdout is reserved for the `YEOLLIN_EXPORT` envelope
+- **Authorization is opt-in per handler**: the middleware authenticates, it does not
+  authorize. Guard admin/destructive routes with `current.require_role("admin")?`
+  (`Authorize` on `CurrentUser`). Refusals are always a bare 403; matching is exact
+- **Plugin registration**: `yeollin plugin add <name>` from the app dir. Never hand-edit
+  the two sites; `yeollin plugin doctor` verifies them. `members` is globbed
 
 ## ANTI-PATTERNS
 
@@ -102,6 +107,11 @@ yeollin_plugin::yeollin_plugin! {
 ## COMMANDS
 
 ```bash
+# Plugins (from app dir)
+yeollin init my-plugin              # scaffold plugins/my-plugin
+yeollin plugin add my-plugin        # register with the app (Cargo.toml + yeollin_app!)
+yeollin plugin doctor               # verify both sites agree, non-zero on drift
+
 # Development (from app dir)
 cd apps/example-app
 cargo run -p yeollin-cli -- dev     # Single port dev server

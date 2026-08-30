@@ -20,26 +20,26 @@ subdirectory.
 
 ```
 plugins/example-memo-plugin/
-?œâ??€ Cargo.toml                          # crate manifest, at the root
-?œâ??€ package.json                        # devDependencies for TypeScript DX
-?œâ??€ tsconfig.json                       # extends packages/app/tsconfig.json
-?œâ??€ vespertide.json                     # database model + migration config
-?œâ??€ models/
-??  ?”â??€ memo.json                       # model definition
-?œâ??€ migrations/
-??  ?”â??€ 0001_initial.vespertide.json    # generated migration
-?œâ??€ src/
-??  ?œâ??€ lib.rs                          # yeollin_plugin! macro
-??  ?œâ??€ models/
-??  ??  ?œâ??€ mod.rs
-??  ??  ?”â??€ memo.rs                     # generated sea-orm entity
-??  ?”â??€ routes/
-??      ?œâ??€ mod.rs
-??      ?”â??€ memo.rs                     # Vespera route handlers
-?”â??€ app/
-    ?”â??€ (memo)/
-        ?œâ??€ page.tsx                    # frontend page
-        ?”â??€ route.meta.json             # label, order, access, menu
+?ï¿½ï¿½??ï¿½ Cargo.toml                          # crate manifest, at the root
+?ï¿½ï¿½??ï¿½ package.json                        # devDependencies for TypeScript DX
+?ï¿½ï¿½??ï¿½ tsconfig.json                       # extends packages/app/tsconfig.json
+?ï¿½ï¿½??ï¿½ vespertide.json                     # database model + migration config
+?ï¿½ï¿½??ï¿½ models/
+??  ?ï¿½ï¿½??ï¿½ memo.json                       # model definition
+?ï¿½ï¿½??ï¿½ migrations/
+??  ?ï¿½ï¿½??ï¿½ 0001_initial.vespertide.json    # generated migration
+?ï¿½ï¿½??ï¿½ src/
+??  ?ï¿½ï¿½??ï¿½ lib.rs                          # yeollin_plugin! macro
+??  ?ï¿½ï¿½??ï¿½ models/
+??  ??  ?ï¿½ï¿½??ï¿½ mod.rs
+??  ??  ?ï¿½ï¿½??ï¿½ memo.rs                     # generated sea-orm entity
+??  ?ï¿½ï¿½??ï¿½ routes/
+??      ?ï¿½ï¿½??ï¿½ mod.rs
+??      ?ï¿½ï¿½??ï¿½ memo.rs                     # Vespera route handlers
+?ï¿½ï¿½??ï¿½ app/
+    ?ï¿½ï¿½??ï¿½ (memo)/
+        ?ï¿½ï¿½??ï¿½ page.tsx                    # frontend page
+        ?ï¿½ï¿½??ï¿½ route.meta.json             # label, order, access, menu
 ```
 
 Standalone applications under `apps/` use the same layout, with `src/main.rs`
@@ -233,6 +233,43 @@ in the OpenAPI document. The doc comment above the handler becomes its summary.
 
 Do not block inside an async handler.
 
+## Guarding routes by role
+
+The auth middleware establishes *who* is calling. It does not decide what they
+may do, so a protected route is reachable by every signed-in account until the
+handler says otherwise. Ask for the role you need:
+
+```rust
+use yeollin_plugin::{Authorize, CurrentUser, PluginError};
+
+/// Remove a memo. Administrators only.
+#[vespera::route(delete, path = "/{id}", tags = ["memo"])]
+pub async fn delete_memo(
+    Extension(db): Extension<DatabaseConnection>,
+    Extension(current): Extension<CurrentUser>,
+    Path(id): Path<i32>,
+) -> Result<Json<DeleteResponse>, PluginError> {
+    current.require_role("admin")?;
+    // ...
+}
+```
+
+`require_any_role(&["admin", "editor"])` accepts several, and `has_role` returns
+a `bool` when you want to vary a response rather than refuse it.
+
+Refusals are always a plain `403 FORBIDDEN`, whichever role was missing, so
+probing endpoints cannot map out the role model. Matching is exact: `Admin` and
+`admin` are different roles.
+
+Audit administrative and destructive endpoints for one of these calls. Forgetting
+one leaves the endpoint open to any authenticated user, which no test will catch
+unless you write it. `GET /api/auth/users` in the `auth` plugin is a worked
+example.
+
+A role check is not a sandbox. Plugins are statically linked and run with full
+process privileges, so this enforces *user* authorization, not isolation of
+plugin code.
+
 ## Frontend pages
 
 Pages live under `app/` in the plugin crate and follow the App Router
@@ -240,9 +277,9 @@ conventions. A directory becomes a route when it contains `page.tsx`.
 
 ```
 app/
-?”â??€ (memo)/
-    ?œâ??€ page.tsx
-    ?”â??€ route.meta.json
+?ï¿½ï¿½??ï¿½ (memo)/
+    ?ï¿½ï¿½??ï¿½ page.tsx
+    ?ï¿½ï¿½??ï¿½ route.meta.json
 ```
 
 A plugin's frontend URL prefix comes from the `name` field in `yeollin_plugin!`,
@@ -447,9 +484,22 @@ bun x tsc --noEmit
 
 ## Register the plugin in an application
 
-Two edits in the host app.
+```bash
+cd apps/example-app
+yeollin plugin add my-plugin
+yeollin plugin doctor
+```
 
-First, add the dependency to its `Cargo.toml`:
+Cargo resolves the dependency graph before proc macros run, so a plugin cannot be
+discovered at compile time. The host application must declare it in two places,
+and half a registration either fails to compile or silently omits the plugin's
+routes and migrations. `plugin add` makes both edits and is a no-op when re-run;
+`plugin doctor` reports a plugin declared on only one side and exits non-zero, so
+it can gate CI.
+
+Both edits are shown below, since you will read them in existing applications.
+
+First, the dependency in `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -465,7 +515,7 @@ underscored form: the crate name `example-memo-plugin` is the module
 
 ```rust
 let app = yeollin::yeollin_app! {
-    plugins: [auth_users, example_plugin, example_memo_plugin],
+    plugins: [auth, example_plugin, example_memo_plugin],
     openapi: "openapi.json",
     title: "Example CMS API",
     version: "1.0.0",
@@ -507,20 +557,30 @@ If you write your own `main.rs`, three rules apply:
 
 ## Creating a new plugin
 
-1. Copy `plugins/example-plugin/` (minimal) or `plugins/example-memo-plugin/`
-   (with a database).
-2. Update `Cargo.toml`: package name, description, dependencies. Keep it at the
-   crate root.
-3. Add the crate to the workspace members in the root `Cargo.toml`.
-4. Edit `src/lib.rs` with your `yeollin_plugin!` metadata.
-5. Add handlers under `src/routes/`, choosing the module path that gives the URL
-   base you want.
-6. Add pages under `app/(your-group)/`, with a `route.meta.json` beside each
+```bash
+yeollin init my-plugin
+cd apps/example-app
+yeollin plugin add my-plugin
+bun install                       # from the repository root
+```
+
+`init` scaffolds the crate and `plugin add` registers it. The workspace `members`
+list is globbed (`crates/*`, `plugins/*`, `apps/*`), so it needs no edit. Then
+fill in the crate:
+
+1. Edit `src/lib.rs` with your `yeollin_plugin!` metadata.
+2. Add handlers under `src/routes/`, choosing the module path that gives the URL
+   base you want, and a role check on anything administrative or destructive.
+3. Add pages under `app/(your-group)/`, with a `route.meta.json` beside each
    `page.tsx` that needs a label, an order, or a non-default access rule.
-7. If you need tables, add `vespertide.json`, `models/*.json`, and the generated
+4. If you need tables, add `vespertide.json`, `models/*.json`, and the generated
    `migrations/`.
-8. Register the crate in the host app's `Cargo.toml` and `yeollin_app!` list.
-9. Run `bun install` from the repository root for TypeScript support.
+5. Declare any JavaScript your pages import in the plugin's `package.json`
+   `dependencies`. Prebuild merges those into the assembled app;
+   `devDependencies` stay local to the crate.
+
+`plugins/example-plugin/` is a minimal reference and `plugins/example-memo-plugin/`
+adds a database.
 
 ## Anti-patterns
 
