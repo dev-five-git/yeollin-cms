@@ -74,8 +74,25 @@ Each plugin has `tsconfig.json` extending `packages/app/tsconfig.json`:
 
 - Frontend path: `concat!(env!("CARGO_MANIFEST_DIR"), "/app")` (NOT `/../app`)
 - Route groups: `(groupname)/` for URL-hidden segments
-- Page discovery: prebuild scans for `page.tsx` files
-- Menus: auto-generated from route structure
+- Page discovery: a directory is a route when it contains `page.tsx`
+- Menus and access rules: declared in `route.meta.json` next to `page.tsx`
+
+### route.meta.json
+
+```json
+{ "label": "Items", "icon": "box", "order": 10, "access": "authenticated", "menu": true }
+```
+
+Every field is optional. Defaults: label = directory name, `order` = 50,
+`access` = `authenticated`, `menu` = true (false for dynamic segments).
+
+`access` is the ONLY way to make a page reachable without a session. Putting a
+page inside `(public)` or `(guest)` grants nothing. Invalid metadata, duplicate
+route paths, and unknown fields fail the build instead of falling back.
+
+A plugin's own URL prefix comes from its crate name in `yeollin_plugin!`, not
+from the route group, so `app/(memo)/archive/page.tsx` in `example-memo-plugin`
+serves `/example-memo-plugin/archive`.
 
 ## MIGRATION FROM OLD STRUCTURE
 
@@ -111,4 +128,6 @@ Steps:
 - **NO** `concat!(env!("CARGO_MANIFEST_DIR"), "/../app")` (use `/app`)
 - **NO** next.config.* in plugin app/ (marks as complete app)
 - **NO** fetch() in page components (use RSC file reads)
-- **NO** manual menu.json (generated from page.tsx locations)
+- **NO** manual menu.json (generated from page.tsx + route.meta.json)
+- **NO** `route.ts` config files (replaced by `route.meta.json`)
+- **NO** relying on `(public)` / `(guest)` directory names for access control

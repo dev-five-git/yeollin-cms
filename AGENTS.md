@@ -1,9 +1,5 @@
 # YEOLLIN CMS - PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-01-23
-**Commit:** 5bcfd78
-**Branch:** main
-
 ## OVERVIEW
 
 Tauri-inspired CMS framework: Rust/Axum backend + vinext/Vite frontend. Plugins bundle API routes + frontend UI in single crates.
@@ -73,8 +69,8 @@ yeollin_plugin::yeollin_plugin! {
 - WebSocket proxy for Vite HMR at `/__vite_hmr`
 
 ### Build Flow
-1. `cargo build` → binary with YEOLLIN_EXPORT_PLUGINS support
-2. `yeollin prebuild` → extract template, link plugins, generate menus.json
+1. `cargo build` → binary that answers `YEOLLIN_EXPORT=1`
+2. `yeollin prebuild` → extract template, link plugins, generate menus.json / plugins.json / route-manifest.json
 3. `bun run --bun build` → vinext emits `.yeollin/app/dist/client/`
 4. CLI copies the static client output to `.yeollin/app/out/`
 5. `cargo build --release` → embeds static files via include_dir!
@@ -83,8 +79,11 @@ yeollin_plugin::yeollin_plugin! {
 
 - **Typography tokens**: `heading`, `subheading`, `body`, `label` (NOT title/caption)
 - **Plugin frontend**: `plugins/<name>/app/` with `(group)/` route groups
+- **Route metadata**: `route.meta.json` next to `page.tsx`. `access` is `authenticated`
+  (default) / `public` / `guest`. Directory names grant nothing
 - **Routes**: Vespera macros `#[vespera::route(get, path = "...", tags = ["..."])]`
 - **State**: Extension layer for SharedMenus, SharedPlugins
+- **Logs go to stderr**: stdout is reserved for the `YEOLLIN_EXPORT` envelope
 
 ## ANTI-PATTERNS
 
@@ -92,6 +91,9 @@ yeollin_plugin::yeollin_plugin! {
 - **NO** fetch() in SSG pages (use file reads for build-time data)
 - **NO** direct edits to `.yeollin/` (regenerated at prebuild)
 - **NO** symlinks in dev mode (use proxy or copy mode)
+- **NO** deriving access from `(public)` / `(guest)` directory names — declare it in `route.meta.json`
+- **NO** prefix matching for public/guest routes — matching is whole-path exact
+- **NO** work before the export branch in `YeollinApp::run` (no DB, no secrets)
 
 ## COMMANDS
 
@@ -113,8 +115,9 @@ bun tsc --noEmit                    # TypeScript (in packages/app)
 | Var | Purpose |
 |-----|---------|
 | `PORT` | API server port (default: 3001) |
-| `YEOLLIN_DEV_PROXY` | Enable dev proxy to vinext port |
-| `YEOLLIN_EXPORT_PLUGINS` | Export plugin JSON and exit |
+| `JWT_SECRET` | **Required to serve.** Min 32 bytes; startup fails otherwise. `yeollin dev` injects an ephemeral one |
+| `YEOLLIN_DEV_PROXY` | Enable dev proxy to vinext port. Also gates the dev-asset auth exemption |
+| `YEOLLIN_EXPORT` | Print one `ExportEnvelope` JSON on stdout and exit (used by prebuild) |
 
 ## NOTES
 
