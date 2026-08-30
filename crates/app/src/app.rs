@@ -13,7 +13,7 @@ use vespera::Schema;
 use yeollin_auth::{auth_middleware, AuthConfig, AuthState};
 use yeollin_core::{
     compile_route_manifest, ExportEnvelope, MenuConfig, PluginInfo, RouteAccess, RouteEntry,
-    RouteSource, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION,
+    RouteSource, SettingsRegistration, SettingsStore, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION,
 };
 use yeollin_plugin::PluginMetadata;
 
@@ -28,13 +28,9 @@ pub struct HealthResponse {
     pub version: String,
 }
 
-
-
 /// Shared plugins for Extension layer
 #[derive(Clone)]
 pub struct SharedPlugins(pub Arc<Vec<PluginInfo>>);
-
-
 
 /// Stored plugin init callback with name for logging
 pub struct PluginInitCallback {
@@ -58,6 +54,8 @@ pub struct YeollinApp {
     routes: Vec<RouteEntry>,
     /// Connected lazily by `run`, so export mode touches no database
     database_url: Option<String>,
+    /// Settings contracts are retained until a database exists at runtime.
+    settings_registrations: Vec<SettingsRegistration>,
 }
 
 impl YeollinApp {
@@ -96,6 +94,16 @@ impl YeollinApp {
                 self.router = self.router.layer(Extension(db.clone()));
                 self.database = Some(db);
             }
+        }
+
+        if !self.settings_registrations.is_empty() {
+            let db = self.database.clone().ok_or_else(|| {
+                anyhow::anyhow!("plugins register settings but no database is configured")
+            })?;
+            yeollin_core::migrate_settings(&db).await?;
+            let settings = SettingsStore::new(db, self.settings_registrations)?;
+            settings.initialize().await?;
+            self.router = self.router.layer(Extension(settings));
         }
 
         // Run plugin initialization callbacks if database is available
@@ -351,6 +359,7 @@ impl YeollinAppBuilder {
         let mut menus = vec![];
         let mut plugins = vec![];
         let mut init_callbacks = vec![];
+        let mut settings_registrations = vec![];
         let mut page_routes: Vec<RouteEntry> = vec![];
 
         if let Some((path, embedded)) = self.app_frontend {
@@ -366,9 +375,8 @@ impl YeollinAppBuilder {
                     }
                 }
             } else {
-                page_routes.extend(
-                    serde_json::from_str::<Vec<RouteEntry>>(embedded).unwrap_or_default(),
-                );
+                page_routes
+                    .extend(serde_json::from_str::<Vec<RouteEntry>>(embedded).unwrap_or_default());
             }
         }
 
@@ -387,6 +395,10 @@ impl YeollinAppBuilder {
             );
 
             // Collect plugin info for export
+            let settings_info = plugin
+                .settings
+                .as_ref()
+                .map(SettingsRegistration::export_info);
             plugins.push(PluginInfo {
                 name: plugin.name.to_string(),
                 version: plugin.version.to_string(),
@@ -394,7 +406,12 @@ impl YeollinAppBuilder {
                 description: plugin.description.map(|s| s.to_string()),
                 license: plugin.license.map(|s| s.to_string()),
                 frontend_path: plugin.frontend_path.map(|s| s.to_string()),
+                settings: settings_info,
             });
+
+            if let Some(settings) = plugin.settings {
+                settings_registrations.push(settings);
+            }
 
             // Collect on_init callback if present
             if let Some(callback) = plugin.on_init {
@@ -485,6 +502,7 @@ impl YeollinAppBuilder {
             auth_config: self.auth_config,
             routes: page_routes,
             database_url: self.database_url,
+            settings_registrations,
         }
     }
 }
@@ -518,9 +536,8 @@ pub async fn get_plugins(Extension(plugins): Extension<SharedPlugins>) -> Json<V
             description: p.description.clone(),
             license: p.license.clone(),
             frontend_path: None,
+            settings: p.settings.clone(),
         })
         .collect();
     Json(public_plugins)
 }
-
-

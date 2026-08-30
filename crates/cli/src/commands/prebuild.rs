@@ -11,7 +11,7 @@ use std::process::Stdio;
 use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, info};
-use yeollin_core::{ExportEnvelope, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION};
+use yeollin_core::{ExportEnvelope, PluginSettingsInfo, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION};
 
 use crate::template::AppTemplate;
 
@@ -125,8 +125,8 @@ async fn find_target_dir(crate_dir: &Path) -> Result<PathBuf> {
         );
     }
 
-    let metadata: serde_json::Value =
-        serde_json::from_slice(&output.stdout).context("Failed to parse `cargo metadata` output")?;
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .context("Failed to parse `cargo metadata` output")?;
 
     metadata
         .get("target_directory")
@@ -168,7 +168,12 @@ pub async fn export_metadata(binary_path: &Path) -> Result<ExportEnvelope> {
         .stderr(Stdio::piped())
         .output()
         .await
-        .with_context(|| format!("Failed to run {} for metadata export", binary_path.display()))?;
+        .with_context(|| {
+            format!(
+                "Failed to run {} for metadata export",
+                binary_path.display()
+            )
+        })?;
 
     if !output.status.success() {
         anyhow::bail!(
@@ -434,7 +439,8 @@ async fn merge_dependencies(
     let mut output_json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&output_package).await?)?;
 
-    let mut sources: Vec<(String, PathBuf)> = vec![("the application".to_string(), app_dir.to_path_buf())];
+    let mut sources: Vec<(String, PathBuf)> =
+        vec![("the application".to_string(), app_dir.to_path_buf())];
     if let Some(envelope) = metadata {
         for plugin in &envelope.plugins {
             if let Some(frontend) = plugin.frontend_path.as_deref() {
@@ -829,7 +835,10 @@ async fn write_manifests(output_dir: &Path, metadata: Option<&ExportEnvelope>) -
 }
 
 /// Copy plugin frontend files
-async fn copy_plugin_frontends(output_dir: &Path, metadata: Option<&ExportEnvelope>) -> Result<bool> {
+async fn copy_plugin_frontends(
+    output_dir: &Path,
+    metadata: Option<&ExportEnvelope>,
+) -> Result<bool> {
     let Some(envelope) = metadata else {
         return Ok(false);
     };
@@ -838,6 +847,30 @@ async fn copy_plugin_frontends(output_dir: &Path, metadata: Option<&ExportEnvelo
 
     for plugin in &envelope.plugins {
         let name = plugin.name.as_str();
+        let dest_base = output_dir.join("src").join("app").join("(auth)").join(name);
+
+        if let Some(settings) = &plugin.settings {
+            let settings_dir = dest_base.join("settings");
+            if settings.custom_page {
+                let frontend_path = plugin.frontend_path.as_deref().with_context(|| {
+                    format!("plugin `{name}` declares a custom settings page without a frontend")
+                })?;
+                let source = Path::new(frontend_path).join("settings");
+                if !source.is_dir() {
+                    anyhow::bail!(
+                        "plugin `{name}` declares a custom settings page, but {} is missing",
+                        source.display()
+                    );
+                }
+                copy_dir_contents_parallel(&source, &settings_dir).await?;
+                info!(plugin = name, "Copied custom plugin settings page");
+            } else {
+                write_generated_settings_page(&settings_dir, name, settings).await?;
+                info!(plugin = name, "Generated plugin settings page");
+            }
+            copied_any = true;
+        }
+
         let Some(frontend_path) = plugin.frontend_path.as_deref() else {
             continue;
         };
@@ -847,8 +880,6 @@ async fn copy_plugin_frontends(output_dir: &Path, metadata: Option<&ExportEnvelo
             debug!("Plugin {} frontend path not found: {}", name, frontend_path);
             continue;
         }
-
-        let dest_base = output_dir.join("src").join("app").join("(auth)").join(name);
 
         let mut entries = fs::read_dir(frontend_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
@@ -870,6 +901,38 @@ async fn copy_plugin_frontends(output_dir: &Path, metadata: Option<&ExportEnvelo
     }
 
     Ok(copied_any)
+}
+
+async fn write_generated_settings_page(
+    settings_dir: &Path,
+    plugin_name: &str,
+    settings: &PluginSettingsInfo,
+) -> Result<()> {
+    fs::create_dir_all(settings_dir).await?;
+    let plugin_name = serde_json::to_string(plugin_name)?;
+    let api_path = serde_json::to_string(&settings.api_path)?;
+    let schema = serde_json::to_string_pretty(&settings.schema)?;
+    let default_value = serde_json::to_string_pretty(&settings.default_value)?;
+    let content = format!(
+        r#"import {{ PluginSettingsForm, type SettingsSchema }} from '@/components/settings/PluginSettingsForm'
+
+const schema = {schema} as SettingsSchema
+const defaultValue = {default_value} as Record<string, unknown>
+
+export default function SettingsPage() {{
+  return (
+    <PluginSettingsForm
+      apiPath={api_path}
+      defaultValue={{defaultValue}}
+      pluginName={plugin_name}
+      schema={{schema}}
+    />
+  )
+}}
+"#
+    );
+    fs::write(settings_dir.join("page.tsx"), content).await?;
+    Ok(())
 }
 
 /// Copy contents of a directory to destination with parallel file copying
@@ -1010,7 +1073,10 @@ mod export_tests {
         let error = parse_export_envelope(&envelope(EXPORT_SCHEMA_VERSION + 1))
             .unwrap_err()
             .to_string();
-        assert!(error.contains("schema version"), "unexpected error: {error}");
+        assert!(
+            error.contains("schema version"),
+            "unexpected error: {error}"
+        );
     }
 }
 
@@ -1019,7 +1085,9 @@ mod assembly_tests {
     use super::{run_prebuild, AppFrontend};
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
-    use yeollin_core::{ExportEnvelope, PluginInfo, EXPORT_SCHEMA_VERSION};
+    use yeollin_core::{
+        ExportEnvelope, PluginInfo, PluginSettingsInfo, EXPORT_SCHEMA_VERSION,
+    };
 
     fn write(path: &Path, contents: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1041,6 +1109,7 @@ mod assembly_tests {
             description: None,
             license: None,
             frontend_path: Some(dir.to_string_lossy().into_owned()),
+            settings: None,
         }
     }
 
@@ -1146,6 +1215,61 @@ mod assembly_tests {
     }
 
     #[tokio::test]
+    async fn settings_pages_are_generated_or_overridden_per_plugin() {
+        let tmp = TempDir::new().unwrap();
+        let (app_dir, output_dir, frontend, mut metadata) = fixture(&tmp);
+        metadata.plugins[0].settings = Some(PluginSettingsInfo {
+            schema: serde_json::json!({
+                "type": "object",
+                "properties": { "enabled": { "type": "boolean" } }
+            }),
+            default_value: serde_json::json!({ "enabled": false }),
+            api_path: "/api/plugin-alpha/settings".to_string(),
+            page_path: "/plugin-alpha/settings".to_string(),
+            custom_page: false,
+        });
+        metadata.plugins[1].settings = Some(PluginSettingsInfo {
+            schema: serde_json::json!({ "type": "object" }),
+            default_value: serde_json::json!({}),
+            api_path: "/api/plugin-beta/settings".to_string(),
+            page_path: "/plugin-beta/settings".to_string(),
+            custom_page: true,
+        });
+        let beta_frontend = PathBuf::from(metadata.plugins[1].frontend_path.as_ref().unwrap());
+        write(
+            &beta_frontend.join("settings").join("page.tsx"),
+            "export default function CustomSettings() { return null }",
+        );
+
+        run_prebuild(
+            &output_dir,
+            &app_dir,
+            Some(&frontend),
+            Some(&metadata),
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let generated = std::fs::read_to_string(
+            output_dir
+                .join("src/app/(auth)/plugin-alpha/settings/page.tsx"),
+        )
+        .unwrap();
+        assert!(generated.contains("PluginSettingsForm"));
+        assert!(generated.contains("/api/plugin-alpha/settings"));
+        assert!(generated.contains("enabled"));
+
+        let custom = std::fs::read_to_string(
+            output_dir.join("src/app/(auth)/plugin-beta/settings/page.tsx"),
+        )
+        .unwrap();
+        assert!(custom.contains("CustomSettings"));
+        assert!(!custom.contains("PluginSettingsForm"));
+    }
+
+    #[tokio::test]
     async fn prebuild_is_deterministic_across_runs() {
         let tmp = TempDir::new().unwrap();
         let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
@@ -1186,8 +1310,7 @@ mod assembly_tests {
             .await
             .unwrap();
 
-        let plugins =
-            std::fs::read_to_string(output_dir.join("src").join("plugins.json")).unwrap();
+        let plugins = std::fs::read_to_string(output_dir.join("src").join("plugins.json")).unwrap();
         assert_eq!(plugins.trim(), "[]");
 
         let files = tree(&output_dir);
@@ -1219,14 +1342,26 @@ mod assembly_tests {
             r#"{"dependencies":{"react":"^19.2.8"},"devDependencies":{}}"#,
         );
         let _ = tmp;
-        run_prebuild(output_dir, app_dir, Some(frontend), Some(metadata), false, false).await
+        run_prebuild(
+            output_dir,
+            app_dir,
+            Some(frontend),
+            Some(metadata),
+            false,
+            false,
+        )
+        .await
     }
 
     #[tokio::test]
     async fn plugin_dependencies_reach_the_generated_app() {
         let tmp = TempDir::new().unwrap();
         let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
-        manifest_of(&tmp, "plugin-alpha", r#"{"dependencies":{"dayjs":"^1.11.23"}}"#);
+        manifest_of(
+            &tmp,
+            "plugin-alpha",
+            r#"{"dependencies":{"dayjs":"^1.11.23"}}"#,
+        );
 
         assemble(&tmp, &app_dir, &output_dir, &frontend, &metadata)
             .await
@@ -1258,8 +1393,16 @@ mod assembly_tests {
     async fn identical_requirements_merge_quietly() {
         let tmp = TempDir::new().unwrap();
         let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
-        manifest_of(&tmp, "plugin-alpha", r#"{"dependencies":{"dayjs":"^1.11.23"}}"#);
-        manifest_of(&tmp, "plugin-beta", r#"{"dependencies":{"dayjs":"^1.11.23"}}"#);
+        manifest_of(
+            &tmp,
+            "plugin-alpha",
+            r#"{"dependencies":{"dayjs":"^1.11.23"}}"#,
+        );
+        manifest_of(
+            &tmp,
+            "plugin-beta",
+            r#"{"dependencies":{"dayjs":"^1.11.23"}}"#,
+        );
 
         assemble(&tmp, &app_dir, &output_dir, &frontend, &metadata)
             .await
@@ -1272,8 +1415,16 @@ mod assembly_tests {
     async fn conflicting_requirements_fail_with_both_sides_named() {
         let tmp = TempDir::new().unwrap();
         let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
-        manifest_of(&tmp, "plugin-alpha", r#"{"dependencies":{"dayjs":"^1.11.23"}}"#);
-        manifest_of(&tmp, "plugin-beta", r#"{"dependencies":{"dayjs":"^2.0.0"}}"#);
+        manifest_of(
+            &tmp,
+            "plugin-alpha",
+            r#"{"dependencies":{"dayjs":"^1.11.23"}}"#,
+        );
+        manifest_of(
+            &tmp,
+            "plugin-beta",
+            r#"{"dependencies":{"dayjs":"^2.0.0"}}"#,
+        );
 
         let error = assemble(&tmp, &app_dir, &output_dir, &frontend, &metadata)
             .await
@@ -1289,7 +1440,11 @@ mod assembly_tests {
     async fn a_plugin_may_not_contradict_the_template() {
         let tmp = TempDir::new().unwrap();
         let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
-        manifest_of(&tmp, "plugin-alpha", r#"{"dependencies":{"react":"^18.0.0"}}"#);
+        manifest_of(
+            &tmp,
+            "plugin-alpha",
+            r#"{"dependencies":{"react":"^18.0.0"}}"#,
+        );
 
         let error = assemble(&tmp, &app_dir, &output_dir, &frontend, &metadata)
             .await

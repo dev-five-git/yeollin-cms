@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/model.schema.json",
+  "name": "settings",
+  "description": "Validated settings stored once per registered plugin",
+  "columns": [
+    {
+      "name": "plugin_name",
+      "type": "text",
+      "nullable": false,
+      "primary_key": true
+    },
+    {
+      "name": "value",
+      "type": "json",
+      "nullable": false
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()"
+    }
+  ]
+}

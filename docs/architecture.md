@@ -111,7 +111,8 @@ flowchart TB
 1. `cargo build` ??produces a binary that can export plugin/menu metadata via
    `YEOLLIN_EXPORT`, which prints one envelope on stdout and exits.
 2. `yeollin prebuild` ??extracts the `packages/app` template into `.yeollin/app/`,
-   copies each plugin's `app/` pages in, and writes `menus.json` / `plugins.json`.
+   copies each plugin's `app/` pages in, generates typed settings forms unless a
+   plugin supplies `app/settings/page.tsx`, and writes `menus.json` / `plugins.json`.
 3. `vinext build` ??static export to `.yeollin/app/dist/client/`, then the CLI
    copies the client output to `.yeollin/app/out/`.
 4. `cargo build --release` ??final binary, embedding static files via `include_dir!`.
@@ -121,3 +122,7 @@ flowchart TB
 `yeollin dev` serves everything on a single port (3001). The Axum router handles
 API routes and proxies everything else to the internal vinext dev server on 3000,
 including the Vite HMR WebSocket at `/__vite_hmr`.
+
+Framework-owned settings migrations run before plugin initializers. The runtime
+then installs a `SettingsStore` extension so plugin handlers read their one
+validated JSON row through the Rust type declared in `yeollin_plugin!`.

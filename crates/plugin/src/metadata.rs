@@ -5,6 +5,7 @@ use axum::Router;
 use sea_orm::DatabaseConnection;
 use std::future::Future;
 use std::pin::Pin;
+use yeollin_core::SettingsRegistration;
 
 /// Type alias for plugin initialization function
 /// Called when plugin is loaded with database connection available
@@ -34,6 +35,8 @@ pub struct PluginMetadata {
     pub frontend_path: Option<&'static str>,
     /// Optional initialization callback (called with database connection)
     pub on_init: Option<PluginInitFn>,
+    /// Optional typed settings contract.
+    pub settings: Option<SettingsRegistration>,
 }
 
 impl PluginMetadata {
@@ -49,6 +52,7 @@ impl PluginMetadata {
             frontend: FrontendAssets::empty(),
             frontend_path: None,
             on_init: None,
+            settings: None,
         }
     }
 }
@@ -64,6 +68,7 @@ pub struct PluginMetadataBuilder {
     frontend: FrontendAssets,
     frontend_path: Option<&'static str>,
     on_init: Option<PluginInitFn>,
+    settings: Option<SettingsRegistration>,
 }
 
 impl PluginMetadataBuilder {
@@ -124,6 +129,12 @@ impl PluginMetadataBuilder {
         self
     }
 
+    /// Register the plugin's typed settings contract.
+    pub fn settings(mut self, settings: SettingsRegistration) -> Self {
+        self.settings = Some(settings);
+        self
+    }
+
     /// Build the plugin metadata
     pub fn build(self) -> PluginMetadata {
         PluginMetadata {
@@ -136,6 +147,7 @@ impl PluginMetadataBuilder {
             frontend: self.frontend,
             frontend_path: self.frontend_path,
             on_init: self.on_init,
+            settings: self.settings,
         }
     }
 }

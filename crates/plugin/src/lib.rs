@@ -33,9 +33,11 @@ pub use yeollin_plugin_macros::yeollin_plugin;
 // Re-export for convenience
 pub use include_dir;
 pub use sea_orm;
+pub use serde_json;
 pub use vespera;
 pub use yeollin_auth;
 pub use yeollin_core;
+pub use yeollin_core::{SettingsError, SettingsRegistration, SettingsStore};
 
 // Re-export commonly used auth types
 pub use yeollin_auth::{
