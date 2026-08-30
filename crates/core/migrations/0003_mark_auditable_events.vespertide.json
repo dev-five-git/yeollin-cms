@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/migration.schema.json",
+  "actions": [
+    {
+      "column": {
+        "default": false,
+        "name": "audit",
+        "nullable": false,
+        "type": "boolean"
+      },
+      "fill_with": null,
+      "table": "events",
+      "type": "add_column"
+    },
+    {
+      "constraint": {
+        "columns": [
+          "audit"
+        ],
+        "type": "index"
+      },
+      "table": "events",
+      "type": "add_constraint"
+    }
+  ],
+  "comment": "mark auditable events",
+  "created_at": "2026-08-30T18:29:02Z",
+  "id": "836122e6-5ca0-4ea8-929f-ef48d777f0e9",
+  "version": 3
+}

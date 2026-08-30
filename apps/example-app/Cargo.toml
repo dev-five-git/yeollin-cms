@@ -23,6 +23,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 sea-orm = { workspace = true }
+audit-log = { path = "../../plugins/audit-log" }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json"] }

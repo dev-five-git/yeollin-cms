@@ -128,4 +128,8 @@ initializers. The runtime then installs `SettingsStore` and `EventBus` Axum
 extensions. Plugin writes use `EventTransaction`: action work, the event insert,
 and Inline database-only subscribers share one transaction. Commit wakes the
 Deferred drainer, while its independent poll loop recovers committed rows after
-a process interruption. Deferred delivery is at-least-once.
+a process interruption. Deferred delivery is at-least-once. Event types opt
+into administrator history with `Event::AUDIT`; `audit-log` queries those rows
+in place. Its retention pass deletes only processed, marked rows so the outbox
+remains the single source of truth and pending delivery is never treated as a
+disposable log.

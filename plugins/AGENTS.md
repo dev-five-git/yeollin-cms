@@ -102,12 +102,18 @@ filesystem, and external-service work must be Deferred. Deferred delivery comes
 from the committed `events` outbox and is at-least-once, so handlers must be
 idempotent.
 
+Audit history is opt-in per event type with `const AUDIT: bool = true`; the
+default is false. The `audit-log` plugin reads marked rows from the same outbox.
+Its retention policy may remove only processed audit rows, because unprocessed
+rows are delivery recovery state.
+
 ## TYPESCRIPT SETUP
 
 Each plugin has `tsconfig.json` extending `packages/app/tsconfig.json`:
 - IDE gets full type support for React, vinext's Next-compatible APIs, @devup-ui/react
 - `@/*` paths resolve to `packages/app/src/*`
-- devDependencies in package.json provide types locally
+- runtime imports belong in `dependencies`; prebuild merges them into the app
+- devDependencies in package.json provide types locally and are not merged
 - Run `bun run typecheck` to verify types
 
 ## CONVENTIONS
@@ -198,7 +204,7 @@ Steps:
 - **NO** `api/` subdirectory (use flat structure)
 - **NO** `concat!(env!("CARGO_MANIFEST_DIR"), "/../app")` (use `/app`)
 - **NO** next.config.* in plugin app/ (marks as complete app)
-- **NO** fetch() in page components (use RSC file reads)
+- **NO** build-time fetch() in SSG pages (use file reads); client pages may fetch runtime APIs
 - **NO** manual menu.json (generated from page.tsx + route.meta.json)
 - **NO** `route.ts` config files (replaced by `route.meta.json`)
 - **NO** relying on `(public)` / `(guest)` directory names for access control

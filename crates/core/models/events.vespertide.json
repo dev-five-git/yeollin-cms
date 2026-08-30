@@ -21,6 +21,13 @@
       "nullable": false
     },
     {
+      "name": "audit",
+      "type": "boolean",
+      "nullable": false,
+      "default": false,
+      "index": true
+    },
+    {
       "name": "created_at",
       "type": "timestamptz",
       "nullable": false,

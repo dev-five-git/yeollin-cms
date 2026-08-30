@@ -218,6 +218,7 @@ struct MemoCreated {
 
 impl Event for MemoCreated {
     const NAME: &'static str = "memo.created";
+    const AUDIT: bool = true;
 }
 
 async fn create(
@@ -242,6 +243,14 @@ matching Inline subscribers in that same transaction. `commit` commits the
 action and event together before it wakes Deferred delivery. The background
 drainer also polls, so a committed row is recovered after a process exits
 between commit and wake.
+
+`Event::AUDIT` defaults to `false`. Set it to `true` only when the payload is
+useful as administrator-facing history. The `audit-log` plugin reads those rows
+directly from the outbox, newest first; it does not copy them into plugin-owned
+storage. Audit payloads therefore need the same deliberate data-minimisation as
+logs: do not emit passwords, tokens, secret values, or unnecessary personal
+data. Its retention job deletes only processed audit rows, never pending
+Deferred delivery state.
 
 Register subscribers with an exact event-name filter. An empty list observes
 all events:

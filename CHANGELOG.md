@@ -21,6 +21,8 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Added
 
+- The `audit-log` plugin provides an administrator-only, paginated event history with exact-name filtering and a typed retention setting. It reads audit-marked rows from the transactional event outbox instead of maintaining duplicate storage.
+- Events can opt into audit history with `Event::AUDIT`. The default is `false`; memo create, update, and delete events opt in. Retention removes only processed audit rows so pending Deferred delivery remains recoverable.
 - Typed event hooks: plugin authors implement `Event` for serializable payloads, emit through an `EventTransaction`, and register exact-name Inline or Deferred subscribers in plugin metadata.
 - A transactional `events` outbox persists events with the action, aborts the action when an Inline subscriber fails, and delivers Deferred subscribers after commit through a notify-driven drainer with polling recovery.
 - Typed plugin settings: `settings: MySettings` registers a `Serialize + Deserialize + Schema + Default` contract, persists one validated JSON row per plugin, generates administrator-only GET/PUT endpoints, and exposes a `SettingsStore` Axum extension for typed reads.

@@ -1,0 +1,19 @@
+[package]
+name = "audit-log"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Administrator audit history for Yeollin CMS events"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+yeollin-plugin = { workspace = true }
+vespera = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }

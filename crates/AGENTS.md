@@ -99,6 +99,7 @@ fn detect_crate_dir(base: &Path) -> Option<PathBuf> {
 - Extension layer for shared state (SharedMenus, SharedPlugins)
 - `EventBus` is an Extension; event-producing writes use `EventTransaction::connection()`
 - Inline subscriber errors abort the action; Deferred delivery wakes after commit and also polls
+- `Event::AUDIT` defaults false; retention must preserve unprocessed outbox rows
 - **Plugin frontend path**: `concat!(env!("CARGO_MANIFEST_DIR"), "/app")` (flat structure)
 
 ## CLI COMMANDS

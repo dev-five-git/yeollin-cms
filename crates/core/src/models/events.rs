@@ -10,6 +10,8 @@ pub struct Model {
     #[sea_orm(indexed)]
     pub name: String,
     pub payload: Json,
+    #[sea_orm(indexed, default_value = false)]
+    pub audit: bool,
     #[sea_orm(indexed, default_value = "NOW()")]
     pub created_at: DateTimeWithTimeZone,
     #[sea_orm(indexed)]
@@ -23,6 +25,7 @@ pub struct Model {
 
 // Index definitions (SeaORM uses Statement builders externally)
 // (unnamed) on [name]
+// (unnamed) on [audit]
 // (unnamed) on [created_at]
 // (unnamed) on [processed_at]
 // (unnamed) on [available_at]
