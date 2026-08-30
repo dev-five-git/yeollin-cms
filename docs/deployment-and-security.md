@@ -233,6 +233,14 @@ and may deliver a row more than once if the previous process stopped after the
 subscriber succeeded but before it marked the row processed; Deferred consumers
 must therefore be idempotent.
 
+The `audit-log` plugin exposes only events whose type explicitly sets
+`Event::AUDIT = true`, and its API requires the exact `admin` role. Treat those
+JSON payloads as sensitive operational data: event producers must omit secrets
+and minimise personal data. Retention defaults to 90 days and is configurable
+through `/audit-log/settings` from 1 through 3650 days. The retention pass runs
+at startup, after event delivery, and before reads, but removes only processed
+audit rows; pending outbox work and non-audit events are preserved.
+
 ## Known limitations
 
 Yeollin CMS is v0.1 and pre-release. The following are known gaps, not oversights

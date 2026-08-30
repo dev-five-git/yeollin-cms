@@ -149,6 +149,12 @@ Open **Settings** after signing in. The example plugin demonstrates a custom
 settings screen, while the memo plugin's form is generated from its Rust and
 Vespera settings schema. Both save through administrator-only typed endpoints.
 
+Create a memo, then open **Audit log**. The memo's `memo.created` event appears
+because that event type opts into audit history. Filter values are exact event
+names, not prefixes. The generated **audit-log settings** page controls retention
+(90 days by default); both the history API and its setting require the `admin`
+role.
+
 ## Explore the API docs
 
 `apps/example-app` configures Vespera to publish its merged OpenAPI document,
@@ -197,7 +203,8 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 bun run lint
 
-for pkg in packages/app apps/example-app plugins/example-plugin plugins/example-memo-plugin; do
+for pkg in packages/app apps/example-app plugins/*/; do
+  [ -f "$pkg/tsconfig.json" ] || continue
   (cd "$pkg" && bun x tsc --noEmit)
 done
 ```

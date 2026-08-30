@@ -68,6 +68,8 @@ yeollin_plugin::yeollin_plugin! {
 - Inline subscribers share that transaction; failure aborts it, and nested emission is refused
 - Deferred subscribers run from the `events` outbox after commit; delivery is at-least-once
 - Inline is database-only. Network and filesystem work is always Deferred
+- Audit history is explicit: set `Event::AUDIT = true`; the default is false
+- Audit retention deletes only processed marked rows, never pending outbox delivery
 
 ### Dev Mode (Single Port)
 - Port 3001: Rust API + dev proxy
@@ -93,6 +95,7 @@ yeollin_plugin::yeollin_plugin! {
 - **Routes**: Vespera macros `#[vespera::route(get, path = "...", tags = ["..."])]`
 - **State**: Extension layer for SharedMenus, SharedPlugins
 - **Events**: `EventBus` extension; action work and `emit` use the same `EventTransaction`
+- **Audit**: event payloads are admin-visible only when their type opts in with `AUDIT = true`
 - **Logs go to stderr**: stdout is reserved for the `YEOLLIN_EXPORT` envelope
 - **Authorization is opt-in per handler**: the middleware authenticates, it does not
   authorize. Guard admin/destructive routes with `current.require_role("admin")?`
