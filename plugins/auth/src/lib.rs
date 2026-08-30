@@ -26,12 +26,29 @@ const ADMIN_PASSWORD_VAR: &str = "YEOLLIN_ADMIN_PASSWORD";
 /// grows for the lifetime of the deployment.
 pub const SESSION_PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
+/// Enforced at every entry point, including the bootstrap administrator.
+pub const MIN_PASSWORD_LEN: usize = 12;
+
+/// Usernames are stored and compared in this form, so `Admin ` and `admin`
+/// cannot become two accounts that look like one.
+pub fn normalize_username(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
+
+pub fn validate_password(password: &str) -> Result<(), String> {
+    if password.chars().count() < MIN_PASSWORD_LEN {
+        return Err(format!(
+            "Password must be at least {MIN_PASSWORD_LEN} characters"
+        ));
+    }
+    Ok(())
+}
+
 yeollin_plugin::yeollin_plugin! {
     name: "auth",
     author: "DevFive",
     description: "Database-backed users and sessions",
     on_init: initialize,
-    frontend: false,
 }
 
 async fn initialize(db: DatabaseConnection) -> anyhow::Result<()> {
@@ -101,10 +118,12 @@ async fn seed_first_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let username = username.trim().to_lowercase();
-    if username.is_empty() || password.is_empty() {
-        anyhow::bail!("{ADMIN_USERNAME_VAR} and {ADMIN_PASSWORD_VAR} must not be empty");
+    let username = normalize_username(&username);
+    if username.is_empty() {
+        anyhow::bail!("{ADMIN_USERNAME_VAR} must not be empty");
     }
+    validate_password(&password)
+        .map_err(|reason| anyhow::anyhow!("{ADMIN_PASSWORD_VAR} rejected: {reason}"))?;
 
     let password_hash =
         hash_password(&password).map_err(|error| anyhow::anyhow!("{error}"))?;
@@ -123,4 +142,35 @@ async fn seed_first_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
 
     tracing::info!(%username, "Created the first administrator");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_username_is_trimmed_and_lowercased() {
+        assert_eq!(normalize_username("  Admin "), "admin");
+    }
+
+    #[test]
+    fn a_short_password_is_refused() {
+        assert!(validate_password(&"a".repeat(MIN_PASSWORD_LEN - 1)).is_err());
+    }
+
+    #[test]
+    fn a_password_of_exactly_the_minimum_is_accepted() {
+        assert!(validate_password(&"a".repeat(MIN_PASSWORD_LEN)).is_ok());
+    }
+
+    #[test]
+    fn length_counts_characters_rather_than_bytes() {
+        // Each Hangul syllable occupies three bytes, so five of them exceed a
+        // twelve-byte threshold while falling short of twelve characters.
+        let five_characters = "\u{ac00}".repeat(5);
+
+        assert_eq!(five_characters.chars().count(), 5);
+        assert!(five_characters.len() > MIN_PASSWORD_LEN);
+        assert!(validate_password(&five_characters).is_err());
+    }
 }

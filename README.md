@@ -46,7 +46,7 @@ routes and proxies everything else to an internal vinext dev server on port
 |----------|---------|
 | `PORT` | API server port. `apps/example-app` defaults to 3001. |
 | `JWT_SECRET` | Signing secret for auth tokens. The server refuses to start unless it is at least 32 bytes. |
-| `YEOLLIN_ADMIN_USERNAME` / `YEOLLIN_ADMIN_PASSWORD` | Read once by the `auth` plugin to create the first administrator while the users table is empty. The password is stored as an Argon2 hash and is never compared in plaintext. |
+| `YEOLLIN_ADMIN_USERNAME` / `YEOLLIN_ADMIN_PASSWORD` | Read once by the `auth` plugin to create the first administrator while the users table is empty. The password must be at least 12 characters, is stored as an Argon2 hash, and is never compared in plaintext. |
 | `YEOLLIN_DEV_PROXY` | Enables the dev proxy to the vinext port. |
 | `YEOLLIN_EXPORT` | Makes the binary print one metadata JSON document on stdout and exit, which is how prebuild discovers its plugins, menus, and routes. |
 
@@ -81,7 +81,8 @@ cargo test --workspace
 
 bun run lint
 
-for pkg in packages/app apps/example-app plugins/example-plugin plugins/example-memo-plugin; do
+for pkg in packages/app apps/example-app plugins/*/; do
+  [ -f "$pkg/tsconfig.json" ] || continue
   (cd "$pkg" && bun x tsc --noEmit)
 done
 ```

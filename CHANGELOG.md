@@ -21,9 +21,17 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Added
 
+- Account management in the `auth` plugin: `POST /api/auth/users` creates, `PATCH /api/auth/users/{id}` changes a role, `DELETE /api/auth/users/{id}` removes an account and its sessions, `POST /api/auth/password` changes your own, and `POST /api/auth/users/{id}/password` lets an administrator reset another. Every one is administrator-only except changing your own password, which requires the current one.
+- A **Users** page at `/auth`, the plugin's first frontend. Roles are `admin` and `user`; an unrecognised role is refused rather than stored, since role matching is exact and a typo would grant nothing.
+- Lockout guards: the only administrator cannot be demoted or deleted, and no account can delete the one it is signed in as. Recovering from either would mean editing the database by hand.
 - `yeollin plugin add` registers a plugin with an application, editing both its `Cargo.toml` dependency and the `yeollin_app!` list. `yeollin plugin doctor` reports plugins that are declared on only one side. The workspace `members` list is globbed, so creating a plugin no longer requires editing it.
 - `Authorize` on `CurrentUser` (`require_role`, `require_any_role`, `has_role`) for guarding routes that authentication alone does not protect. `GET /api/auth/users` uses it.
 - `auth` plugin: users and sessions tables, `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/me`, and first-administrator bootstrap from `YEOLLIN_ADMIN_USERNAME` / `YEOLLIN_ADMIN_PASSWORD`.
+
+### Changed
+
+- Passwords must be at least 12 **characters** — counted as characters, not bytes, so a short multi-byte password cannot pass. This applies to the bootstrap administrator too, so a deployment whose `YEOLLIN_ADMIN_PASSWORD` is shorter now fails at startup with the reason rather than seeding a weak account.
+- Changing or resetting a password ends every session for that account. A refresh token minted before the change stops working, which is what makes a password change useful for containing a compromise.
 
 ### Fixed
 

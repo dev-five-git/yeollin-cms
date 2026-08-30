@@ -76,13 +76,30 @@ impl Server {
     }
 }
 
-async fn login(client: &reqwest::Client, server: &Server, password: &str) -> reqwest::Response {
+async fn login_as(
+    client: &reqwest::Client,
+    server: &Server,
+    username: &str,
+    password: &str,
+) -> reqwest::Response {
     client
         .post(server.url("/api/auth/login"))
-        .json(&serde_json::json!({ "username": ADMIN, "password": password }))
+        .json(&serde_json::json!({ "username": username, "password": password }))
         .send()
         .await
         .expect("login request")
+}
+
+async fn login(client: &reqwest::Client, server: &Server, password: &str) -> reqwest::Response {
+    login_as(client, server, ADMIN, password).await
+}
+
+async fn admin_token(client: &reqwest::Client, server: &Server) -> String {
+    let tokens: Value = login(client, server, PASSWORD).await.json().await.unwrap();
+    tokens["access_token"]
+        .as_str()
+        .expect("access token")
+        .to_string()
 }
 
 #[tokio::test]
@@ -213,6 +230,218 @@ async fn assembled_system_enforces_role_on_admin_routes() {
     assert!(
         roster["users"][0].get("passwordHash").is_none(),
         "a password hash must never leave the server"
+    );
+}
+
+#[tokio::test]
+async fn assembled_system_manages_accounts() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+    let token = admin_token(&client, &server).await;
+
+    let created = client
+        .post(server.url("/api/auth/users"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "username": "  Editor ",
+            "password": "another-long-password",
+            "role": "user",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), 200);
+
+    let account: Value = created.json().await.unwrap();
+    assert_eq!(account["username"], "editor", "username must be normalised");
+    assert!(
+        account.get("passwordHash").is_none(),
+        "a password hash must never leave the server"
+    );
+    let editor_id = account["id"].as_i64().expect("new account id");
+
+    let duplicate = client
+        .post(server.url("/api/auth/users"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "username": "editor",
+            "password": "another-long-password",
+            "role": "user",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), 409, "usernames must stay unique");
+
+    let unknown_role = client
+        .post(server.url("/api/auth/users"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "username": "someone",
+            "password": "another-long-password",
+            "role": "superuser",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unknown_role.status(), 400, "an unknown role grants nothing");
+
+    let short_password = client
+        .post(server.url("/api/auth/users"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "username": "someone",
+            "password": "short",
+            "role": "user",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(short_password.status(), 400);
+
+    // The 403 branch of the role guard, which could not be reached before there
+    // was a way to create a second account.
+    let editor: Value = login_as(&client, &server, "editor", "another-long-password")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let editor_token = editor["access_token"].as_str().expect("editor token");
+
+    let refused = client
+        .get(server.url("/api/auth/users"))
+        .bearer_auth(editor_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 403, "an ordinary account may not read it");
+
+    let escalation = client
+        .patch(server.url(&format!("/api/auth/users/{editor_id}")))
+        .bearer_auth(editor_token)
+        .json(&serde_json::json!({ "role": "admin" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(escalation.status(), 403, "nobody may promote themselves");
+
+    let deleted = client
+        .delete(server.url(&format!("/api/auth/users/{editor_id}")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), 200);
+
+    let gone = login_as(&client, &server, "editor", "another-long-password").await;
+    assert_eq!(gone.status(), 401, "a deleted account must not sign in");
+}
+
+#[tokio::test]
+async fn assembled_system_refuses_to_lock_itself_out() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+    let token = admin_token(&client, &server).await;
+
+    let roster: Value = client
+        .get(server.url("/api/auth/users"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let admin_id = roster["users"][0]["id"].as_i64().expect("administrator id");
+
+    let demoted = client
+        .patch(server.url(&format!("/api/auth/users/{admin_id}")))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "role": "user" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        demoted.status(),
+        409,
+        "demoting the only administrator would need hand-editing the database to undo"
+    );
+
+    let self_deleted = client
+        .delete(server.url(&format!("/api/auth/users/{admin_id}")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(self_deleted.status(), 409);
+
+    let identity: Value = client
+        .get(server.url("/api/auth/me"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(identity["role"], "admin", "the refusals must not half-apply");
+}
+
+#[tokio::test]
+async fn assembled_system_ends_sessions_when_a_password_changes() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+
+    let tokens: Value = login(&client, &server, PASSWORD).await.json().await.unwrap();
+    let access = tokens["access_token"].as_str().expect("access token");
+    let refresh = tokens["refresh_token"].as_str().expect("refresh token");
+
+    let wrong_current = client
+        .post(server.url("/api/auth/password"))
+        .bearer_auth(access)
+        .json(&serde_json::json!({
+            "currentPassword": "not-the-password",
+            "newPassword": "a-replacement-password",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        wrong_current.status(),
+        401,
+        "a stolen access token alone must not change the password"
+    );
+
+    let changed = client
+        .post(server.url("/api/auth/password"))
+        .bearer_auth(access)
+        .json(&serde_json::json!({
+            "currentPassword": PASSWORD,
+            "newPassword": "a-replacement-password",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), 200);
+
+    let stale = client
+        .post(server.url("/api/auth/refresh"))
+        .json(&serde_json::json!({ "refresh_token": refresh }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        stale.status(),
+        401,
+        "a refresh token minted before the change must stop working"
+    );
+
+    assert_eq!(login(&client, &server, PASSWORD).await.status(), 401);
+    assert_eq!(
+        login(&client, &server, "a-replacement-password")
+            .await
+            .status(),
+        200
     );
 }
 

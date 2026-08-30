@@ -14,10 +14,8 @@
     "apps/example-app": {
       "name": "example-app",
       "version": "0.1.0",
-      "dependencies": {
-        "@devup-ui/react": "^1.0",
-      },
       "devDependencies": {
+        "@devup-ui/react": "^1.0",
         "@types/react": "^19",
         "react": "^19",
         "typescript": "^7.0",
@@ -54,6 +52,17 @@
     "packages/types": {
       "name": "@yeollin/types",
       "version": "0.1.0",
+    },
+    "plugins/auth": {
+      "name": "@yeollin-plugin/auth",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@devup-ui/react": "^1.0",
+        "@types/react": "^19",
+        "react": "^19",
+        "typescript": "^7.0",
+        "vinext": "^1.0.0-beta.8",
+      },
     },
     "plugins/example-memo-plugin": {
       "name": "@yeollin-plugin/example-memo-plugin",
@@ -475,6 +484,8 @@
     "@xtuc/ieee754": ["@xtuc/ieee754@1.2.0", "", {}, "sha512-DX8nKgqcGwsc0eJSqYt5lwP4DH5FlHnmuWWBRy7X0NcaGR0ZtuyeESgMwTYVEtxmsNGY+qit4QYT/MIYTOTPeA=="],
 
     "@xtuc/long": ["@xtuc/long@4.2.2", "", {}, "sha512-NuHqBY1PB/D8xU6s/thBgOAiAP7HOYDQ32+BFZILJ8ivkUkAHQnWfn6WhL79Owj1qmUnoN/YPhktdIoucipkAQ=="],
+
+    "@yeollin-plugin/auth": ["@yeollin-plugin/auth@workspace:plugins/auth"],
 
     "@yeollin-plugin/example-memo-plugin": ["@yeollin-plugin/example-memo-plugin@workspace:plugins/example-memo-plugin"],
 

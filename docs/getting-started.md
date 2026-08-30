@@ -101,7 +101,7 @@ while the users table is still empty:
 | Variable | Purpose |
 |----------|---------|
 | `YEOLLIN_ADMIN_USERNAME` | Username for the first administrator. Trimmed and lowercased. |
-| `YEOLLIN_ADMIN_PASSWORD` | Its password. Hashed with Argon2 on insert; never stored or compared in plaintext. |
+| `YEOLLIN_ADMIN_PASSWORD` | Its password, at least 12 characters. Hashed with Argon2 on insert; never stored or compared in plaintext. |
 
 Set both and start the dev server:
 

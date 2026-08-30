@@ -103,7 +103,7 @@ Whether a token was valid is not the caller's business.
 | Variable | Purpose |
 |----------|---------|
 | `YEOLLIN_ADMIN_USERNAME` | Username. Trimmed and lowercased. |
-| `YEOLLIN_ADMIN_PASSWORD` | Password. Hashed with Argon2 on insert. |
+| `YEOLLIN_ADMIN_PASSWORD` | Password, at least 12 characters. Hashed with Argon2 on insert. Startup fails with the reason if it is shorter, rather than seeding a weak administrator. |
 
 Behaviour worth knowing:
 
@@ -123,6 +123,26 @@ remove the variables from the environment and restart.
 
 There are no `SUPERADMIN_USERNAME` or `SUPERADMIN_PASSWORD` variables and no
 framework-level superadmin account.
+
+## Managing accounts afterwards
+
+Administrators manage accounts from the **Users** page at `/auth`, or over the
+API under `/api/auth/users`. Three refusals are deliberate and will look like
+bugs if you do not expect them:
+
+- **The only administrator cannot be demoted or deleted.** Promotion requires the
+  administrator role, so there would be nobody left able to grant it back and
+  recovery would mean editing the database by hand. Promote a second account
+  first.
+- **An account cannot delete the one it is signed in as**, even when other
+  administrators exist, since the caller's own session would die mid-request.
+- **An unrecognised role is refused rather than stored.** Role matching is exact,
+  so a typo like `Admin` would be a role that grants nothing while looking
+  deliberate. The accepted values are `admin` and `user`.
+
+Changing or resetting a password deletes every session for that account, so the
+holder of a stolen refresh token loses access at the moment the password changes.
+The person who changed it signs in again.
 
 ## Route access is deny-by-default
 
