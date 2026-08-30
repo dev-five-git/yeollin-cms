@@ -1,0 +1,25 @@
+[package]
+name = "webhooks"
+version = "0.1.0"
+edition = "2021"
+description = "Signed event webhooks with SSRF-safe delivery"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+yeollin-plugin = { workspace = true }
+vespera = { workspace = true }
+vespertide = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+sea-orm = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }

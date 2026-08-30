@@ -1,0 +1,6 @@
+{
+  "label": "Webhooks",
+  "order": 40,
+  "access": "authenticated",
+  "menu": true
+}

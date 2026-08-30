@@ -26,7 +26,11 @@ sea-orm = { workspace = true }
 audit-log = { path = "../../plugins/audit-log" }
 media = { path = "../../plugins/media" }
 content = { path = "../../plugins/content" }
+webhooks = { path = "../../plugins/webhooks" }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json", "multipart"] }
 tempfile = { workspace = true }
+axum = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }

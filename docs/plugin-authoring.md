@@ -450,6 +450,58 @@ event transaction uncommittable and rolls it back. Deferred delivery is
 at-least-once, so Deferred handlers must be idempotent; a crash after the handler
 succeeds but before the outbox row is marked can deliver it again.
 
+### Signed webhooks
+
+The `webhooks` plugin is the standard external Deferred subscriber. Its
+administrator page at `/webhooks` configures endpoints and shows per-endpoint
+delivery history. The API lives at `/api/webhooks`; signing secrets are accepted
+on create or replacement but are never serialized back to a caller.
+
+Each matching endpoint receives the serialized `EventEnvelope` as the exact
+request body with these headers:
+
+| Header | Value |
+|--------|-------|
+| `Content-Type` | `application/json` |
+| `X-Yeollin-Event` | Exact event name, such as `content.published` |
+| `X-Yeollin-Delivery` | Stable per-endpoint delivery ID |
+| `X-Yeollin-Signature` | `sha256=<lowercase hex HMAC-SHA256>` |
+
+Verify the signature over the raw request bytes before parsing JSON. The
+conceptual check is `HMAC-SHA256(endpoint_secret, raw_body)`. Compare the
+supplied and calculated digests in constant time. Do not calculate the digest
+over re-serialized JSON, because whitespace and object-key ordering can change
+the byte sequence.
+
+Endpoint event filters use whole-name exact matching. An empty filter receives
+every event; `content` does not match `content.published`. A successful endpoint
+is not sent again when another endpoint needs a retry. Failures retry through
+the core outbox with delays of 1, 2, 4, 8 seconds and so on, capped at five
+minutes. Each endpoint stops after five attempts and enters `dead_letter`.
+Administrators can explicitly retry a dead letter while its immutable source
+event still exists.
+
+Every delivery has its own timeout (1–30 seconds), accepts only HTTP or HTTPS,
+and refuses redirects. Before connecting, the plugin resolves the hostname,
+blocks private, loopback, and link-local addresses by default, and pins the
+validated DNS answers into the HTTP client to prevent DNS rebinding between the
+check and connection. Unspecified, multicast, and IPv6 unique-local addresses
+are refused too. `allowPrivateNetworks` is an explicit per-endpoint opt-out for
+a trusted internal receiver; enabling it removes the address-range guard, not
+the signature, timeout, or redirect protections.
+
+The management routes are administrator-only:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET`, `POST` | `/api/webhooks` | List endpoints or create one. |
+| `PUT`, `DELETE` | `/api/webhooks/{id}` | Replace or delete endpoint configuration. |
+| `GET` | `/api/webhooks/deliveries` | Paginated history with endpoint/status filters. |
+| `POST` | `/api/webhooks/deliveries/{id}/retry` | Reset a dead letter and requeue its source event. |
+
+Treat event payloads as a public contract with the receiving system. Never put
+passwords, tokens, signing secrets, or unnecessary personal data in an event.
+
 ## API routes: how URLs are derived
 
 Every plugin API lives under `/api/<base>`:

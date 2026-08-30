@@ -1,0 +1,163 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/migration.schema.json",
+  "actions": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "type": "text"
+        },
+        {
+          "index": true,
+          "name": "webhook_id",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "index": true,
+          "name": "event_id",
+          "nullable": false,
+          "type": "big_int"
+        },
+        {
+          "index": true,
+          "name": "event_name",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "index": true,
+          "name": "status",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "default": 0,
+          "name": "attempts",
+          "nullable": false,
+          "type": "integer"
+        },
+        {
+          "name": "response_status",
+          "nullable": true,
+          "type": "integer"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "text"
+        },
+        {
+          "default": "NOW()",
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "type": "timestamptz"
+        },
+        {
+          "default": "NOW()",
+          "name": "updated_at",
+          "nullable": false,
+          "type": "timestamptz"
+        },
+        {
+          "name": "delivered_at",
+          "nullable": true,
+          "type": "timestamptz"
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "webhook_id",
+            "event_id"
+          ],
+          "name": "uq_webhook_deliveries_endpoint_event",
+          "type": "unique"
+        }
+      ],
+      "table": "deliveries",
+      "type": "create_table"
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "type": "text"
+        },
+        {
+          "index": true,
+          "name": "name",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "url",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "secret",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "event_names",
+          "nullable": false,
+          "type": "json"
+        },
+        {
+          "default": false,
+          "name": "allow_private_networks",
+          "nullable": false,
+          "type": "boolean"
+        },
+        {
+          "default": 5,
+          "name": "timeout_seconds",
+          "nullable": false,
+          "type": "integer"
+        },
+        {
+          "default": true,
+          "index": true,
+          "name": "enabled",
+          "nullable": false,
+          "type": "boolean"
+        },
+        {
+          "default": "NOW()",
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "type": "timestamptz"
+        },
+        {
+          "default": "NOW()",
+          "name": "updated_at",
+          "nullable": false,
+          "type": "timestamptz"
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "name"
+          ],
+          "name": "uq_webhook_endpoints_name",
+          "type": "unique"
+        }
+      ],
+      "table": "endpoints",
+      "type": "create_table"
+    }
+  ],
+  "comment": "create webhook endpoints and deliveries",
+  "created_at": "2026-08-30T21:51:35Z",
+  "id": "36dbdbd2-148f-458d-8129-cc0a47febc91",
+  "version": 1
+}
