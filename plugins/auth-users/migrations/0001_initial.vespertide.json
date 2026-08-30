@@ -1,0 +1,104 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/migration.schema.json",
+  "actions": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "primary_key": {
+            "auto_increment": true
+          },
+          "type": "integer"
+        },
+        {
+          "name": "username",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "password_hash",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "role",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "default": "NOW()",
+          "name": "created_at",
+          "nullable": false,
+          "type": "timestamptz"
+        },
+        {
+          "default": "NOW()",
+          "name": "updated_at",
+          "nullable": false,
+          "type": "timestamptz"
+        }
+      ],
+      "constraints": [
+        {
+          "columns": ["username"],
+          "name": "uq_auth_users_username",
+          "type": "unique"
+        }
+      ],
+      "table": "users",
+      "type": "create_table"
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "primary_key": {
+            "auto_increment": true
+          },
+          "type": "integer"
+        },
+        {
+          "index": true,
+          "name": "user_id",
+          "nullable": false,
+          "type": "integer"
+        },
+        {
+          "name": "refresh_token_hash",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "expires_at",
+          "nullable": false,
+          "type": "timestamptz"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "type": "timestamptz"
+        },
+        {
+          "default": "NOW()",
+          "name": "created_at",
+          "nullable": false,
+          "type": "timestamptz"
+        }
+      ],
+      "constraints": [
+        {
+          "columns": ["refresh_token_hash"],
+          "name": "uq_auth_sessions_refresh_token_hash",
+          "type": "unique"
+        }
+      ],
+      "table": "sessions",
+      "type": "create_table"
+    }
+  ],
+  "comment": "Initial users and sessions",
+  "created_at": "2026-08-29T00:00:00Z",
+  "version": 1
+}

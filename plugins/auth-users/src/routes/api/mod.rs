@@ -1,2 +1,2 @@
 //! API routes
-pub mod memos;
+pub mod auth;

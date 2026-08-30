@@ -13,6 +13,7 @@ path = "src/main.rs"
 yeollin-app = { path = "../../crates/app" }
 example-plugin = { path = "../../plugins/example-plugin" }
 example-memo-plugin = { path = "../../plugins/example-memo-plugin" }
+auth-users = { path = "../../plugins/auth-users" }
 
 vespera = { workspace = true }
 serde = { workspace = true }
@@ -22,3 +23,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 sea-orm = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true, features = ["json"] }
+tempfile = { workspace = true }

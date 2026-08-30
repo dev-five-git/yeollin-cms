@@ -11,6 +11,7 @@ use std::process::Stdio;
 use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, info};
+use yeollin_core::{ExportEnvelope, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION};
 
 use crate::template::AppTemplate;
 
@@ -153,36 +154,67 @@ pub async fn find_binary_path(crate_dir: &Path) -> Result<PathBuf> {
     Ok(binary_path)
 }
 
-/// Export data from the built binary using an environment variable
-pub async fn export_from_binary(binary_path: &Path, env_var: &str) -> Result<String> {
-    debug!("Exporting {} from {}", env_var, binary_path.display());
+/// Read the metadata envelope from a built binary.
+///
+/// The binary must emit exactly one JSON document on stdout and exit zero. Any
+/// other outcome is an error: a partially-parsed manifest would silently drop
+/// plugins, routes, or access rules from the assembled app.
+pub async fn export_metadata(binary_path: &Path) -> Result<ExportEnvelope> {
+    debug!("Exporting metadata from {}", binary_path.display());
 
     let output = Command::new(binary_path)
-        .env(env_var, "1")
+        .env(EXPORT_ENV_VAR, "1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .output()
         .await
-        .context(format!("Failed to run binary for {} export", env_var))?;
+        .with_context(|| format!("Failed to run {} for metadata export", binary_path.display()))?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+        anyhow::bail!(
+            "{} exited with {} during metadata export.\n{}",
+            binary_path.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
 
-    // Find JSON array in output
-    let json_start = stdout
-        .rfind("\n[")
-        .map(|i| i + 1)
-        .or_else(|| {
-            if stdout.starts_with('[') {
-                Some(0)
-            } else {
-                None
-            }
-        })
-        .unwrap_or(0);
+    let stdout = String::from_utf8(output.stdout)
+        .context("metadata export produced non-UTF-8 output on stdout")?;
 
-    let json_str = &stdout[json_start..];
+    parse_export_envelope(&stdout)
+        .with_context(|| format!("reading metadata export from {}", binary_path.display()))
+}
 
-    Ok(json_str.trim().to_string())
+/// Parse the stdout of an export run into an envelope.
+///
+/// The whole stream must be one envelope. Recovering a payload from a partly
+/// polluted stream is exactly what the previous "scan for a JSON array"
+/// heuristic did, and it silently produced manifests missing plugins or routes.
+pub(crate) fn parse_export_envelope(stdout: &str) -> Result<ExportEnvelope> {
+    let trimmed = stdout.trim();
+
+    if trimmed.is_empty() {
+        anyhow::bail!("metadata export wrote nothing to stdout");
+    }
+
+    let envelope: ExportEnvelope = serde_json::from_str(trimmed).map_err(|error| {
+        anyhow::anyhow!(
+            "stdout is not a metadata envelope ({error}). \
+             Application logs must go to stderr so stdout carries only the envelope."
+        )
+    })?;
+
+    if envelope.schema_version != EXPORT_SCHEMA_VERSION {
+        anyhow::bail!(
+            "metadata envelope has schema version {}, but this CLI understands {}. \
+             Rebuild the application against a matching yeollin version.",
+            envelope.schema_version,
+            EXPORT_SCHEMA_VERSION
+        );
+    }
+
+    Ok(envelope)
 }
 
 pub async fn run(args: PrebuildArgs) -> Result<()> {
@@ -230,62 +262,39 @@ pub async fn run(args: PrebuildArgs) -> Result<()> {
         }
     }
 
-    // Export menus and plugins from binary IN PARALLEL
-    let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
-        let binary_path = find_binary_path(crate_path).await?;
-
-        info!("Exporting menus and plugins from binary (parallel)...");
-
-        // Run both exports in parallel
-        let (menus_result, plugins_result) = tokio::join!(
-            export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS"),
-            export_from_binary(&binary_path, "YEOLLIN_EXPORT_PLUGINS")
-        );
-
-        let menus = match menus_result {
-            Ok(m) => {
-                info!("Exported menus successfully");
-                Some(m)
-            }
-            Err(e) => {
-                debug!("Could not export menus: {}", e);
-                None
-            }
-        };
-
-        let plugins = match plugins_result {
-            Ok(p) => {
-                info!("Exported plugins successfully");
-                Some(p)
-            }
-            Err(e) => {
-                debug!("Could not export plugins: {}", e);
-                None
-            }
-        };
-
-        (menus, plugins)
-    } else {
-        (None, None)
+    // A failed export is fatal: assembling the frontend from partial metadata
+    // would silently drop plugins, routes, or access rules.
+    let metadata = match crate_dir {
+        Some(ref crate_path) => {
+            let binary_path = find_binary_path(crate_path).await?;
+            let envelope = export_metadata(&binary_path).await?;
+            info!(
+                plugins = envelope.plugins.len(),
+                routes = envelope.routes.len(),
+                "Exported metadata from binary"
+            );
+            Some(envelope)
+        }
+        None => None,
     };
 
     run_prebuild(
         &output_dir,
+        &current_dir,
         frontend.as_ref(),
-        menus_json.as_deref(),
-        plugins_json.as_deref(),
+        metadata.as_ref(),
         args.force,
         args.proxy,
     )
     .await
 }
 
-/// Run prebuild with optional frontend, menus, and plugins
+/// Run prebuild with optional frontend and exported application metadata
 pub async fn run_prebuild(
     output_dir: &Path,
+    app_dir: &Path,
     frontend: Option<&AppFrontend>,
-    menus_json: Option<&str>,
-    plugins_json: Option<&str>,
+    metadata: Option<&ExportEnvelope>,
     force: bool,
     use_proxy: bool,
 ) -> Result<()> {
@@ -303,12 +312,11 @@ pub async fn run_prebuild(
     info!("Extracted app template to {}", output_dir.display());
 
     // 4. Copy openapi.json from api/ if it exists
-    let current_dir = std::env::current_dir()?;
-    copy_openapi_json(&current_dir, output_dir).await?;
+    copy_openapi_json(app_dir, output_dir).await?;
 
     // 5. If frontend exists, merge dependencies, link, and collect public routes
     if let Some(app) = frontend {
-        merge_dependencies(output_dir, &current_dir).await?;
+        merge_dependencies(output_dir, app_dir).await?;
         info!("Merged dependencies");
 
         if use_proxy {
@@ -320,21 +328,11 @@ pub async fn run_prebuild(
         }
     }
 
-    // 6. Write menus.json and plugins.json IN PARALLEL
-    let menus_json_owned = menus_json.map(|s| s.to_string());
-    let plugins_json_owned = plugins_json.map(|s| s.to_string());
-    let output_dir_owned = output_dir.to_path_buf();
-    let output_dir_owned2 = output_dir.to_path_buf();
-
-    let (menus_result, plugins_result) = tokio::join!(
-        write_menus(&output_dir_owned, menus_json_owned.as_deref()),
-        write_plugins(&output_dir_owned2, plugins_json_owned.as_deref())
-    );
-    menus_result?;
-    plugins_result?;
+    // 6. Write the generated manifests
+    write_manifests(output_dir, metadata).await?;
 
     // 7. Copy plugin frontend files (always copy, no proxy for plugins)
-    let has_plugins = copy_plugin_frontends(output_dir, plugins_json).await?;
+    let has_plugins = copy_plugin_frontends(output_dir, metadata).await?;
 
     // 8. Ensure (auth)/layout.tsx exists if plugins were copied
     if has_plugins {
@@ -351,8 +349,8 @@ pub async fn run_prebuild(
 }
 
 /// Copy openapi.json from api/ directory to output if it exists
-async fn copy_openapi_json(current_dir: &Path, output_dir: &Path) -> Result<()> {
-    let api_openapi = current_dir.join("api").join("openapi.json");
+async fn copy_openapi_json(app_dir: &Path, output_dir: &Path) -> Result<()> {
+    let api_openapi = app_dir.join("api").join("openapi.json");
 
     if api_openapi.exists() {
         let dest = output_dir.join("openapi.json");
@@ -763,54 +761,56 @@ async fn generate_auth_layout(auth_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Write menus.json from exported menus or empty array
-async fn write_menus(output_dir: &Path, menus_json: Option<&str>) -> Result<()> {
-    let menus_path = output_dir.join("src").join("menus.json");
+/// Write the manifests the frontend reads at build time.
+///
+/// Route access rules are deliberately absent: they are compiled into the binary
+/// by `yeollin_plugin!`, so emitting them here as well would create a second
+/// copy that nothing reads and that could silently disagree.
+async fn write_manifests(output_dir: &Path, metadata: Option<&ExportEnvelope>) -> Result<()> {
+    let src_dir = output_dir.join("src");
 
-    let content = if let Some(json_str) = menus_json {
-        let menu_configs: Vec<serde_json::Value> =
-            serde_json::from_str(json_str).unwrap_or_default();
-
-        let menu_items: Vec<serde_json::Value> = menu_configs
-            .into_iter()
-            .filter_map(|config| config.get("items").cloned())
-            .filter_map(|items| items.as_array().cloned())
-            .flatten()
-            .collect();
-
-        serde_json::to_string_pretty(&menu_items).unwrap_or_else(|_| "[]".to_string())
-    } else {
-        "[]".to_string()
+    let (menu_items, plugins) = match metadata {
+        Some(envelope) => (
+            envelope
+                .menus
+                .iter()
+                .flat_map(|config| config.items.iter().cloned())
+                .collect(),
+            envelope.plugins.clone(),
+        ),
+        None => (vec![], vec![]),
     };
 
-    fs::write(&menus_path, content).await?;
-    info!("Wrote menus.json");
-    Ok(())
-}
+    fs::write(
+        src_dir.join("menus.json"),
+        serde_json::to_string_pretty(&menu_items)?,
+    )
+    .await?;
+    fs::write(
+        src_dir.join("plugins.json"),
+        serde_json::to_string_pretty(&plugins)?,
+    )
+    .await?;
 
-/// Write plugins.json from exported plugins or empty array
-async fn write_plugins(output_dir: &Path, plugins_json: Option<&str>) -> Result<()> {
-    let plugins_path = output_dir.join("src").join("plugins.json");
-    let content = plugins_json.unwrap_or("[]");
-    fs::write(&plugins_path, content).await?;
-    info!("Wrote plugins.json");
+    info!(
+        menus = menu_items.len(),
+        plugins = plugins.len(),
+        "Wrote generated manifests"
+    );
     Ok(())
 }
 
 /// Copy plugin frontend files
-async fn copy_plugin_frontends(output_dir: &Path, plugins_json: Option<&str>) -> Result<bool> {
-    let Some(json_str) = plugins_json else {
+async fn copy_plugin_frontends(output_dir: &Path, metadata: Option<&ExportEnvelope>) -> Result<bool> {
+    let Some(envelope) = metadata else {
         return Ok(false);
     };
 
-    let plugins: Vec<serde_json::Value> = serde_json::from_str(json_str).unwrap_or_default();
     let mut copied_any = false;
 
-    for plugin in plugins {
-        let Some(name) = plugin.get("name").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let Some(frontend_path) = plugin.get("frontend_path").and_then(|v| v.as_str()) else {
+    for plugin in &envelope.plugins {
+        let name = plugin.name.as_str();
+        let Some(frontend_path) = plugin.frontend_path.as_deref() else {
             continue;
         };
 
@@ -919,4 +919,251 @@ async fn copy_dir_recursive_parallel(src: PathBuf, dst: PathBuf) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::parse_export_envelope;
+    use yeollin_core::EXPORT_SCHEMA_VERSION;
+
+    fn envelope(schema_version: u32) -> String {
+        format!(
+            r#"{{"schemaVersion":{schema_version},"plugins":[{{"name":"memo","version":"0.1.0"}}],"menus":[],"routes":[{{"path":"/memo","label":"Memo","order":50,"access":"authenticated","menu":true}}]}}"#
+        )
+    }
+
+    #[test]
+    fn accepts_a_lone_envelope() {
+        let parsed = parse_export_envelope(&envelope(EXPORT_SCHEMA_VERSION)).unwrap();
+
+        assert_eq!(parsed.schema_version, EXPORT_SCHEMA_VERSION);
+        assert_eq!(parsed.plugins.len(), 1);
+        assert_eq!(parsed.plugins[0].name, "memo");
+        assert_eq!(parsed.routes.len(), 1);
+        assert_eq!(parsed.routes[0].path, "/memo");
+    }
+
+    #[test]
+    fn tolerates_surrounding_whitespace_only() {
+        let padded = format!("\n  {}  \n", envelope(EXPORT_SCHEMA_VERSION));
+        assert!(parse_export_envelope(&padded).is_ok());
+    }
+
+    #[test]
+    fn rejects_log_polluted_stdout() {
+        let polluted = format!("INFO starting up\n{}", envelope(EXPORT_SCHEMA_VERSION));
+
+        let error = parse_export_envelope(&polluted).unwrap_err().to_string();
+        assert!(
+            error.contains("logs must go to stderr"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn rejects_trailing_output_after_the_envelope() {
+        let polluted = format!("{}\nINFO shutting down", envelope(EXPORT_SCHEMA_VERSION));
+        assert!(parse_export_envelope(&polluted).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_stdout() {
+        assert!(parse_export_envelope("   \n ").is_err());
+    }
+
+    #[test]
+    fn rejects_a_bare_json_array() {
+        // The shape the old heuristic scanned for must no longer be accepted.
+        assert!(parse_export_envelope(r#"[{"name":"memo"}]"#).is_err());
+    }
+
+    #[test]
+    fn rejects_a_mismatched_schema_version() {
+        let error = parse_export_envelope(&envelope(EXPORT_SCHEMA_VERSION + 1))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("schema version"), "unexpected error: {error}");
+    }
+}
+
+#[cfg(test)]
+mod assembly_tests {
+    use super::{run_prebuild, AppFrontend};
+    use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
+    use yeollin_core::{ExportEnvelope, PluginInfo, EXPORT_SCHEMA_VERSION};
+
+    fn write(path: &Path, contents: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+
+    fn page(root: &Path, relative: &str) {
+        write(
+            &root.join(relative).join("page.tsx"),
+            "export default function Page() { return null }",
+        );
+    }
+
+    fn plugin(name: &str, dir: &Path) -> PluginInfo {
+        PluginInfo {
+            name: name.to_string(),
+            version: "0.1.0".to_string(),
+            author: None,
+            description: None,
+            license: None,
+            frontend_path: Some(dir.to_string_lossy().into_owned()),
+        }
+    }
+
+    /// One host app plus two plugin frontends, all inside a temp directory so
+    /// the assembly never depends on the process working directory.
+    fn fixture(tmp: &TempDir) -> (PathBuf, PathBuf, AppFrontend, ExportEnvelope) {
+        let root = tmp.path();
+        let app_dir = root.join("host");
+        let output_dir = root.join("out");
+
+        write(&app_dir.join("package.json"), r#"{"dependencies":{}}"#);
+        page(&app_dir.join("app"), "(main)");
+
+        let alpha = root.join("plugin-alpha");
+        page(&alpha, "(alpha)");
+        page(&alpha, "(alpha)/items");
+
+        let beta = root.join("plugin-beta");
+        page(&beta, "(beta)");
+
+        let frontend = AppFrontend {
+            name: "host".to_string(),
+            app_path: app_dir.join("app"),
+        };
+
+        let metadata = ExportEnvelope {
+            schema_version: EXPORT_SCHEMA_VERSION,
+            plugins: vec![plugin("plugin-alpha", &alpha), plugin("plugin-beta", &beta)],
+            menus: vec![],
+            routes: vec![],
+        };
+
+        (app_dir, output_dir, frontend, metadata)
+    }
+
+    fn tree(root: &Path) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if let Ok(rel) = path.strip_prefix(root) {
+                    found.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
+    #[tokio::test]
+    async fn prebuild_assembles_two_plugins() {
+        let tmp = TempDir::new().unwrap();
+        let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
+
+        run_prebuild(
+            &output_dir,
+            &app_dir,
+            Some(&frontend),
+            Some(&metadata),
+            true,
+            false,
+        )
+        .await
+        .expect("prebuild must succeed");
+
+        let files = tree(&output_dir);
+        for expected in [
+            "src/menus.json",
+            "src/plugins.json",
+            "src/app/(auth)/layout.tsx",
+            "src/app/(auth)/plugin-alpha/page.tsx",
+            "src/app/(auth)/plugin-alpha/items/page.tsx",
+            "src/app/(auth)/plugin-beta/page.tsx",
+        ] {
+            assert!(
+                files.contains(&expected.to_string()),
+                "missing {expected} in assembled output:\n{}",
+                files.join("\n")
+            );
+        }
+
+        let plugins: Vec<PluginInfo> = serde_json::from_str(
+            &std::fs::read_to_string(output_dir.join("src").join("plugins.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(plugins.len(), 2);
+        assert_eq!(plugins[0].name, "plugin-alpha");
+
+        // Access rules are compiled into the binary, not emitted here, so a
+        // second copy must never reappear in the generated app.
+        assert!(
+            !files.iter().any(|file| file.contains("route-manifest")),
+            "prebuild must not emit a route manifest"
+        );
+    }
+
+    #[tokio::test]
+    async fn prebuild_is_deterministic_across_runs() {
+        let tmp = TempDir::new().unwrap();
+        let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
+
+        run_prebuild(
+            &output_dir,
+            &app_dir,
+            Some(&frontend),
+            Some(&metadata),
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+        let first = tree(&output_dir);
+
+        run_prebuild(
+            &output_dir,
+            &app_dir,
+            Some(&frontend),
+            Some(&metadata),
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+        let second = tree(&output_dir);
+
+        assert_eq!(first, second, "re-running prebuild changed the output tree");
+    }
+
+    #[tokio::test]
+    async fn prebuild_without_metadata_emits_empty_manifests() {
+        let tmp = TempDir::new().unwrap();
+        let (app_dir, output_dir, frontend, _) = fixture(&tmp);
+
+        run_prebuild(&output_dir, &app_dir, Some(&frontend), None, true, false)
+            .await
+            .unwrap();
+
+        let plugins =
+            std::fs::read_to_string(output_dir.join("src").join("plugins.json")).unwrap();
+        assert_eq!(plugins.trim(), "[]");
+
+        let files = tree(&output_dir);
+        assert!(
+            !files.iter().any(|f| f.contains("plugin-alpha")),
+            "no plugin frontend should be copied without metadata"
+        );
+    }
 }

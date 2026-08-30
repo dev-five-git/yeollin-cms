@@ -2,16 +2,19 @@
 
 ## OVERVIEW
 
-Four crates: core (types), plugin (interface), app (runtime), cli (tooling).
+Six crates: core (types + route manifest + export contract), auth (JWT/Argon2/middleware),
+plugin (interface), plugin-macros (proc macros), app (runtime), cli (tooling).
 
 ## STRUCTURE
 
 ```
 crates/
-├── core/      # MenuConfig, shared types
-├── plugin/    # PluginMetadata, yeollin_plugin! macro
-├── app/       # YeollinApp, server, static/dev proxy
-└── cli/       # yeollin-cli commands (dev, build, prebuild)
+├── core/           # MenuConfig, RouteManifest, ExportEnvelope, shared types
+├── auth/           # AuthConfig, JWT, Argon2, auth_middleware
+├── plugin/         # PluginMetadata, FrontendAssets
+├── plugin-macros/  # yeollin_plugin!, yeollin_app!
+├── app/            # YeollinApp, server, static/dev proxy
+└── cli/            # yeollin-cli commands (init, prebuild, dev, build)
 ```
 
 ## WHERE TO LOOK
@@ -19,11 +22,43 @@ crates/
 | Task | File | Notes |
 |------|------|-------|
 | Add plugin field | `plugin/src/metadata.rs` | Update struct + builder |
-| Add plugin macro field | `plugin/src/macros.rs` | Uses CARGO_PKG_* env vars |
+| Add plugin macro field | `plugin-macros/src/lib.rs` | Uses CARGO_PKG_* env vars |
 | Modify app builder | `app/src/app.rs` | YeollinAppBuilder methods |
 | Add CLI command | `cli/src/commands/` | New module + update mod.rs |
-| Plugin export logic | `cli/src/commands/prebuild.rs` | PluginInfo struct, detect_crate_dir() |
+| Route metadata / menus | `core/src/route.rs` | `compile_route_manifest()`, `build_menu()` |
+| App ↔ CLI metadata contract | `core/src/export.rs` | `ExportEnvelope`, `EXPORT_ENV_VAR` |
+| Read metadata from a binary | `cli/src/commands/prebuild.rs` | `export_metadata()`, `parse_export_envelope()` |
 | Crate detection | `cli/src/commands/prebuild.rs` | `detect_crate_dir()` for flat/legacy support |
+
+## ROUTE METADATA (SECURITY-RELEVANT)
+
+Page routes are discovered from the App Router tree, but **access rules are never
+inferred from directory names**. A `route.meta.json` sidecar next to `page.tsx`
+declares them:
+
+```json
+{ "label": "Items", "icon": "box", "order": 10, "access": "public", "menu": false }
+```
+
+- `access` is one of `authenticated` (default), `public`, `guest`.
+- Route groups such as `(public)` / `(guest)` organise files and **grant nothing**.
+- Unknown fields, invalid values, duplicate paths, and `menu: true` on a dynamic
+  route all fail the build. There is no silent fallback.
+- `menu` affects navigation only, never authorization.
+
+`YeollinAppBuilder::app_frontend()` registers the host app's own `app/` directory;
+`yeollin_app!` wires it automatically.
+
+## METADATA EXPORT PROTOCOL
+
+`prebuild` runs the built binary once with `YEOLLIN_EXPORT=1`. The binary must:
+
+1. Emit exactly one `ExportEnvelope` JSON document on **stdout** and nothing else.
+2. Send all logs to **stderr** (`fmt::layer().with_writer(std::io::stderr)`).
+3. Exit before connecting to a database, running `on_init`, or requiring secrets.
+
+Use `with_database_url()` rather than `with_database()` so the connection is
+opened lazily and export stays side-effect free.
 
 ## KEY TYPES
 

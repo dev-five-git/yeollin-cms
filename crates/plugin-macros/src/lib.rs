@@ -152,6 +152,40 @@ fn has_vespertide_json() -> bool {
         .unwrap_or(false)
 }
 
+/// Compile the crate's `app/` routes while the macro expands.
+///
+/// A deployed binary no longer has the build machine's source tree, so routes —
+/// and with them every `public` and `guest` access rule — are baked in here
+/// rather than rediscovered from disk at startup. Invalid metadata fails the
+/// build instead of the running server.
+fn compile_embedded_routes(plugin: Option<&str>) -> String {
+    let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") else {
+        return "[]".to_string();
+    };
+
+    let app_dir = std::path::Path::new(&manifest_dir).join("app");
+    if !app_dir.is_dir() {
+        return "[]".to_string();
+    }
+
+    let source = match plugin {
+        Some(name) => yeollin_core::RouteSource::plugin(name, &app_dir),
+        None => yeollin_core::RouteSource::app(&app_dir),
+    };
+
+    match yeollin_core::compile_route_manifest(&[source]) {
+        Ok(manifest) => serde_json::to_string(&manifest.routes)
+            .unwrap_or_else(|error| panic!("could not serialize route manifest: {error}")),
+        Err(diagnostics) => {
+            let details: String = diagnostics
+                .iter()
+                .map(|diagnostic| format!("\n  {diagnostic}"))
+                .collect();
+            panic!("invalid route metadata:{details}")
+        }
+    }
+}
+
 #[proc_macro]
 pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
     let def = parse_macro_input!(input as PluginDef);
@@ -203,8 +237,13 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
     };
 
     let frontend_setters = if has_frontend {
+        let embedded = compile_embedded_routes(Some(&name_str));
         quote! {
-            .frontend(yeollin_plugin::FrontendAssets::from_path(#name_lit, FRONTEND_PATH))
+            .frontend(yeollin_plugin::FrontendAssets::compile(
+                #name_lit,
+                FRONTEND_PATH,
+                #embedded,
+            ))
             .frontend_path(FRONTEND_PATH)
         }
     } else {
@@ -368,8 +407,14 @@ pub fn yeollin_app(input: TokenStream) -> TokenStream {
     let docs_url_config = def.docs_url.as_ref().map(|d| quote! { docs_url = #d, });
     let redoc_url_config = def.redoc_url.as_ref().map(|r| quote! { redoc_url = #r, });
 
+    let app_routes = compile_embedded_routes(None);
+
     let expanded = quote! {
         yeollin::app()
+            // Registered unconditionally: when the app has no `app/` directory the
+            // compiler yields no routes, which is the same fail-closed outcome as
+            // not registering it.
+            .app_frontend(concat!(env!("CARGO_MANIFEST_DIR"), "/app"), #app_routes)
             #(#register_plugins)*
             .merge(yeollin::vespera::vespera!(
                 #openapi_config
@@ -382,4 +427,56 @@ pub fn yeollin_app(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_pascal_case;
+
+    /// `yeollin_plugin!` derives the export identifier from the plugin's *name
+    /// string* (hyphenated), while `yeollin_app!` derives the same identifier
+    /// from the plugin's *module path* (underscored). If those two derivations
+    /// ever disagree the generated app fails to link against the plugin.
+    #[test]
+    fn hyphenated_names_and_underscored_idents_agree() {
+        for (name, module) in [
+            ("example-plugin", "example_plugin"),
+            ("example-memo-plugin", "example_memo_plugin"),
+            ("auth", "auth"),
+            ("a-b-c-d", "a_b_c_d"),
+        ] {
+            assert_eq!(
+                to_pascal_case(name),
+                to_pascal_case(module),
+                "`{name}` and `{module}` must produce one export identifier"
+            );
+        }
+    }
+
+    #[test]
+    fn produces_expected_export_identifiers() {
+        assert_eq!(to_pascal_case("example-plugin"), "ExamplePlugin");
+        assert_eq!(to_pascal_case("example-memo-plugin"), "ExampleMemoPlugin");
+        assert_eq!(to_pascal_case("auth"), "Auth");
+    }
+
+    #[test]
+    fn collapses_repeated_and_trailing_separators() {
+        assert_eq!(to_pascal_case("a--b"), "AB");
+        assert_eq!(to_pascal_case("-leading"), "Leading");
+        assert_eq!(to_pascal_case("trailing-"), "Trailing");
+        assert_eq!(to_pascal_case("mixed-_case"), "MixedCase");
+    }
+
+    #[test]
+    fn preserves_digits_and_existing_capitals() {
+        assert_eq!(to_pascal_case("plugin-v2"), "PluginV2");
+        assert_eq!(to_pascal_case("s3-storage"), "S3Storage");
+    }
+
+    #[test]
+    fn empty_input_yields_empty_identifier() {
+        assert_eq!(to_pascal_case(""), "");
+        assert_eq!(to_pascal_case("---"), "");
+    }
 }

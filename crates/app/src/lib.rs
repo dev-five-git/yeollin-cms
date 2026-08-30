@@ -10,19 +10,16 @@
 //! #[tokio::main]
 //! async fn main() {
 //!     let app = yeollin::app()
-//!         .with_auth(
-//!             AuthConfig::new("secret")
-//!                 .superadmin("admin", "password")
-//!         )
+//!         .with_auth(AuthConfig::new(std::env::var("JWT_SECRET").unwrap()))
+//!         .register_plugin(auth_users::metadata())
 //!         .register_plugin(my_plugin::metadata())
 //!         .build();
-//!     
+//!
 //!     app.run().await;
 //! }
 //! ```
 
 mod app;
-mod auth_routes;
 mod dev_proxy;
 mod server;
 mod state;
@@ -43,8 +40,7 @@ pub use vespera;
 // Re-export auth utilities for plugins and apps
 pub use yeollin_auth::{
     auth_middleware, generate_access_token, generate_token, hash_password, verify_password,
-    verify_token, AuthConfig, AuthError, AuthState, Claims, CurrentUser, SuperadminConfig,
-    TokenPair, TokenType,
+    verify_token, AuthConfig, AuthError, AuthState, Claims, CurrentUser, TokenPair, TokenType,
 };
 
 // Re-export database utilities for plugins and apps

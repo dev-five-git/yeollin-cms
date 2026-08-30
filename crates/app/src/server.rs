@@ -28,7 +28,12 @@ impl Server {
         tracing::info!("Starting Yeollin CMS server on {}", addr);
 
         let listener = tokio::net::TcpListener::bind(&addr).await?;
-        axum::serve(listener, router).await?;
+        // Connect info is published so handlers can rate-limit per source address.
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await?;
 
         Ok(())
     }

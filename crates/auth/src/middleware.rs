@@ -70,7 +70,7 @@ pub async fn auth_middleware(
     let path = request.uri().path().to_string();
 
     // Frontend assets don't need auth
-    if is_frontend_asset(&path) {
+    if is_frontend_asset(&path, state.config.dev_mode) {
         return next.run(request).await;
     }
 
@@ -108,18 +108,40 @@ pub async fn auth_middleware(
     }
 }
 
-fn is_frontend_asset(path: &str) -> bool {
-    const ASSET_PREFIXES: &[&str] = &[
-        "/_next/",
-        "/static/",
-        "/@",
-        "/__vite_hmr",
-        "/node_modules/",
-        "/src/",
-        "/df/",
-    ];
+/// Bundled output namespaces that exist in both dev and release builds.
+const BUILT_ASSET_PREFIXES: &[&str] = &["/_next/", "/static/"];
 
-    path.ends_with(".ico") || ASSET_PREFIXES.iter().any(|prefix| path.starts_with(prefix))
+/// Paths served only by the Vite dev server. They are absent from a release
+/// binary, so exempting them outside dev mode would grant an auth bypass for
+/// routes the application itself may still answer.
+const DEV_ASSET_PREFIXES: &[&str] = &["/@", "/__vite_hmr", "/node_modules/", "/src/", "/df/"];
+
+/// Individually exempt files, matched exactly.
+///
+/// Matching a *suffix* such as `.ico` here would exempt every path ending in it,
+/// letting `/memo/1.ico` reach a handler unauthenticated.
+const EXEMPT_FILES: &[&str] = &["/favicon.ico"];
+
+fn is_frontend_asset(path: &str, dev_mode: bool) -> bool {
+    if path.contains("..") {
+        return false;
+    }
+
+    if EXEMPT_FILES.contains(&path) {
+        return true;
+    }
+
+    if BUILT_ASSET_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+    {
+        return true;
+    }
+
+    dev_mode
+        && DEV_ASSET_PREFIXES
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
 }
 
 /// Extract token from request (header or cookie)
@@ -184,27 +206,116 @@ fn guest_redirect(config: &AuthConfig, path: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::is_frontend_asset;
+    use crate::config::AuthConfig;
+
+    const DEV: bool = true;
+    const PROD: bool = false;
 
     #[test]
-    fn allows_vite_and_static_asset_paths() {
+    fn allows_built_assets_in_every_mode() {
+        for path in ["/_next/static/chunk.js", "/static/logo.svg", "/favicon.ico"] {
+            assert!(is_frontend_asset(path, PROD), "expected asset: {path}");
+            assert!(is_frontend_asset(path, DEV), "expected asset: {path}");
+        }
+    }
+
+    #[test]
+    fn allows_vite_dev_assets_only_in_dev_mode() {
         for path in [
-            "/_next/static/chunk.js",
             "/@id/virtual:vite-rsc/entry-browser",
             "/@vite/client",
             "/__vite_hmr",
             "/node_modules/vinext/dist/client.js",
             "/src/app/page.tsx",
             "/df/index.ts",
-            "/favicon.ico",
         ] {
-            assert!(is_frontend_asset(path), "expected asset path: {path}");
+            assert!(is_frontend_asset(path, DEV), "expected dev asset: {path}");
+            assert!(
+                !is_frontend_asset(path, PROD),
+                "dev asset must not bypass auth in production: {path}"
+            );
         }
     }
 
     #[test]
     fn keeps_application_routes_protected() {
         for path in ["/", "/signin", "/example-plugin", "/api/menus"] {
-            assert!(!is_frontend_asset(path), "expected application path: {path}");
+            assert!(
+                !is_frontend_asset(path, DEV),
+                "expected application path: {path}"
+            );
         }
+    }
+
+    #[test]
+    fn icon_suffix_does_not_exempt_application_routes() {
+        for path in [
+            "/memo/1.ico",
+            "/api/auth/me.ico",
+            "/api/menus.ico",
+            "/example-plugin/items/secret.ico",
+        ] {
+            assert!(
+                !is_frontend_asset(path, DEV),
+                "`.ico` suffix must not bypass auth: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn traversal_attempts_are_never_assets() {
+        for path in ["/_next/../memo/1", "/static/../../api/menus", "/src/../memo"] {
+            assert!(
+                !is_frontend_asset(path, DEV),
+                "traversal must not be treated as an asset: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_and_guest_routes_match_whole_paths_only() {
+        let config = AuthConfig::default();
+
+        assert!(config.is_public_route("/health"));
+        assert!(config.is_public_route("/health/"));
+        assert!(config.is_public_route("/api/auth/login"));
+        assert!(config.is_guest_route("/signin"));
+
+        for path in [
+            "/healthz",
+            "/health-check",
+            "/health/details",
+            "/api/auth/login-extra",
+            "/api/auth/login/escalate",
+        ] {
+            assert!(
+                !config.is_public_route(path),
+                "prefix must not widen public access: {path}"
+            );
+        }
+
+        for path in ["/signinx", "/signin/reset"] {
+            assert!(
+                !config.is_guest_route(path),
+                "prefix must not widen guest access: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_routes_stay_protected() {
+        let config = AuthConfig::default();
+
+        for path in ["/", "/memo", "/whatever", "/api/unknown"] {
+            assert!(!config.is_public_route(path), "unexpectedly public: {path}");
+        }
+    }
+
+    #[test]
+    fn weak_jwt_secrets_are_rejected() {
+        assert!(AuthConfig::default().validate().is_err());
+        assert!(AuthConfig::new("short").validate().is_err());
+        assert!(AuthConfig::new("y".repeat(31)).validate().is_err());
+        assert!(AuthConfig::new("y".repeat(32)).validate().is_ok());
     }
 }

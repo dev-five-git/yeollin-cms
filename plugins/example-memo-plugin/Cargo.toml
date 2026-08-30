@@ -9,7 +9,6 @@ description = "Example memo plugin with database CRUD for Yeollin CMS"
 yeollin-plugin = { path = "../../crates/plugin" }
 vespera = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 sea-orm = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }

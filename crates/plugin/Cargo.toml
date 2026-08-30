@@ -14,6 +14,6 @@ vespera = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 include_dir = { workspace = true }
-regex = { workspace = true }
 sea-orm = { workspace = true }
 anyhow = { workspace = true }
+tracing = { workspace = true }

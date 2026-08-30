@@ -10,7 +10,7 @@ mod middleware;
 mod password;
 
 pub use claims::{Claims, TokenType};
-pub use config::{AuthConfig, SuperadminConfig};
+pub use config::{AuthConfig, MIN_JWT_SECRET_LEN};
 pub use error::AuthError;
 pub use jwt::{generate_access_token, generate_token, verify_token, TokenPair};
 pub use middleware::{auth_middleware, extract_token, AuthState, CurrentUser};

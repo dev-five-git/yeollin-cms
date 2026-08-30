@@ -1,0 +1,21 @@
+[package]
+name = "auth-users"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Database-backed users and sessions for Yeollin CMS authentication"
+
+[dependencies]
+yeollin-plugin = { path = "../../crates/plugin" }
+vespera = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sea-orm = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+vespertide = { workspace = true }
+anyhow = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
