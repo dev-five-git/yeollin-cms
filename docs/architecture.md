@@ -6,7 +6,7 @@ both the API and the statically exported frontend.
 
 ```mermaid
 flowchart TB
-    subgraph CLI["?îß yeollin-cli"]
+    subgraph CLI["?ÔøΩÔøΩ yeollin-cli"]
         direction LR
         init["init"]
         prebuild["prebuild"]
@@ -23,7 +23,7 @@ flowchart TB
         appLib["yeollin-app<br/>(YeollinApp, YeollinAppBuilder)"]
     end
 
-    subgraph Plugins["?ß© Plugins (Rust Crate + vinext)"]
+    subgraph Plugins["?ÔøΩÔøΩ Plugins (Rust Crate + vinext)"]
         direction TB
         subgraph P1["example-plugin"]
             p1routes["API Routes<br/>/api/example/*"]
@@ -37,7 +37,7 @@ flowchart TB
         end
     end
 
-    subgraph Frontend["?õÔ∏è Frontend (packages/app)"]
+    subgraph Frontend["?ÔøΩÔ∏è Frontend (packages/app)"]
         direction TB
         vinext["vinext + Vite 8 + React 19"]
         devupui["@devup-ui/react"]
@@ -58,7 +58,7 @@ flowchart TB
         end
     end
 
-    subgraph BuildOutput["?ì¶ Build Output"]
+    subgraph BuildOutput["?ÔøΩÔøΩ Build Output"]
         direction LR
         dotYeollin[".yeollin/app/<br/>(assembled frontend)"]
         binary["Single Binary<br/>(API + Static + DB)"]
@@ -109,7 +109,7 @@ flowchart TB
 ## Build flow
 
 1. `cargo build` ??produces a binary that can export plugin/menu metadata via
-   `YEOLLIN_EXPORT_PLUGINS` / `YEOLLIN_EXPORT_MENUS`.
+   `YEOLLIN_EXPORT`, which prints one envelope on stdout and exits.
 2. `yeollin prebuild` ??extracts the `packages/app` template into `.yeollin/app/`,
    copies each plugin's `app/` pages in, and writes `menus.json` / `plugins.json`.
 3. `vinext build` ??static export to `.yeollin/app/dist/client/`, then the CLI

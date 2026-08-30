@@ -220,14 +220,20 @@ in this document.
   process, so they reset on restart and are not shared between instances. Run a
   single instance, or add rate limiting in the reverse proxy as well. There is no
   backoff and no CAPTCHA.
-- **No per-plugin capability authorization.** Authentication is all-or-nothing
-  for protected routes. A signed-in user's role is carried in the access token
-  and returned by `/api/auth/me`, but the framework does not enforce
-  role-based or capability-based authorization on plugin API routes. A plugin
-  that needs finer-grained checks must implement them in its own handlers.
-- **No browser or end-to-end test coverage.** CI runs clippy, `cargo test`,
-  `cargo doc`, oxlint, `tsc --noEmit`, and a frontend build. Nothing exercises
-  the running application through a browser.
+- **Authorization is opt-in per handler.** The middleware authenticates; it does
+  not decide what a caller may do, so every signed-in account reaches every
+  protected route until a handler says otherwise. `Authorize` on `CurrentUser`
+  provides `require_role`, `require_any_role`, and `has_role`, but a plugin that
+  forgets to call one leaves its endpoint open to any authenticated user. Audit
+  administrative and destructive endpoints for a role check.
+- **A capability check is not a sandbox.** Plugins are statically linked, so
+  third-party plugin code runs with full process privileges. `require_role`
+  enforces *user* authorization; it does not isolate the plugin itself. Only
+  install plugins you trust as much as the application.
+- **No browser test coverage.** CI runs clippy, `cargo test`, `cargo doc`,
+  oxlint, `tsc --noEmit`, and a frontend build. Four of those tests boot the
+  real binary and drive it over HTTP, but nothing exercises the application
+  through a browser.
 
 ## Deployment checklist
 
