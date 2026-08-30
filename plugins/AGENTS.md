@@ -84,9 +84,13 @@ plugin's `name`. The frontend already uses the same name, so one declaration
 gives `/<name>` for pages and `/api/<name>` for the API.
 
 ```rust
-yeollin_plugin! { name: "media-library" }              // -> /api/media-library
-yeollin_plugin! { name: "auth-users", api_base: "auth" } // -> /api/auth
+yeollin_plugin! { name: "media-library" }                        // -> /api/media-library
+yeollin_plugin! { name: "reporting-suite", api_base: "reports" } // -> /api/reports
 ```
+
+None of the plugins in this repository set `api_base`; they all take the name
+default. The `auth` plugin is named for the namespace it serves precisely so it
+does not need an override.
 
 `api_base` is only for when the URL namespace should differ from the name. It
 must NOT contain `api` — that segment is structural and always prepended.
