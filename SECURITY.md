@@ -7,7 +7,7 @@ audit, and its interfaces change without notice. **It is not yet suitable for
 handling production data.** Use it for development, evaluation, and
 experimentation only, with data you can afford to lose or disclose.
 
-Credentials live in the `auth-users` plugin. It creates the first administrator
+Credentials live in the `auth` plugin. It creates the first administrator
 from `YEOLLIN_ADMIN_USERNAME` and `YEOLLIN_ADMIN_PASSWORD` only while the users
 table is empty, stores the password as an Argon2 hash, and never compares a
 password in plaintext. The server refuses to start unless `JWT_SECRET` is at

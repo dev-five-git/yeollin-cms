@@ -44,6 +44,7 @@ struct PluginDef {
     description: Option<LitStr>,
     on_init: Option<Expr>,
     frontend: Option<bool>,
+    api_base: Option<LitStr>,
 }
 
 impl Parse for PluginDef {
@@ -53,6 +54,7 @@ impl Parse for PluginDef {
         let mut description: Option<LitStr> = None;
         let mut on_init: Option<Expr> = None;
         let mut frontend: Option<bool> = None;
+        let mut api_base: Option<LitStr> = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -74,6 +76,9 @@ impl Parse for PluginDef {
                 "frontend" => {
                     let val: LitBool = input.parse()?;
                     frontend = Some(val.value());
+                }
+                "api_base" => {
+                    api_base = Some(input.parse()?);
                 }
                 _ => {
                     return Err(syn::Error::new(
@@ -97,8 +102,55 @@ impl Parse for PluginDef {
             description,
             on_init,
             frontend,
+            api_base,
         })
     }
+}
+
+/// Every plugin API lives under this segment. It is prepended by the framework
+/// and must not be repeated in `api_base`.
+const API_ROOT: &str = "/api";
+
+/// Lower-case and hyphenate, since `-` is the conventional URL word separator.
+fn to_kebab_case(value: &str) -> String {
+    value.trim().to_lowercase().replace('_', "-")
+}
+
+/// Resolve the URL prefix a plugin's routes are mounted under.
+///
+/// Defaults to the plugin name so that the common case declares nothing, and
+/// so that a plugin's API namespace matches the frontend namespace it already
+/// gets from the same name.
+fn resolve_api_prefix(def: &PluginDef) -> syn::Result<String> {
+    let Some(base) = def.api_base.as_ref() else {
+        return Ok(format!("{API_ROOT}/{}", to_kebab_case(&def.name.value())));
+    };
+
+    let raw = base.value();
+    let trimmed = raw.trim().trim_matches('/');
+
+    if trimmed.is_empty() {
+        return Err(syn::Error::new(
+            base.span(),
+            "`api_base` must not be empty. Omit it to derive the base from `name`.",
+        ));
+    }
+
+    // `/api` is structural, not something a plugin opts into, so accepting it
+    // here would silently produce `/api/api/...`.
+    let first = trimmed.split('/').next().unwrap_or_default();
+    if first.eq_ignore_ascii_case("api") {
+        return Err(syn::Error::new(
+            base.span(),
+            format!(
+                "`api_base` must not start with `api`; every plugin API is already mounted under `{API_ROOT}`. \
+                 Write `api_base: \"{}\"`.",
+                trimmed.strip_prefix(first).unwrap_or("").trim_matches('/')
+            ),
+        ));
+    }
+
+    Ok(format!("{API_ROOT}/{}", to_kebab_case(trimmed)))
 }
 
 /// Define a Yeollin plugin with automatic OpenAPI export.
@@ -250,9 +302,16 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
         quote! {}
     };
 
+    let api_prefix = match resolve_api_prefix(&def) {
+        Ok(prefix) => prefix,
+        Err(error) => return TokenStream::from(error.to_compile_error()),
+    };
+
     let expanded = quote! {
-        // Auto-generate export_app with PascalCase name derived from plugin name
-        yeollin_plugin::vespera::export_app!(#export_ident);
+        // Auto-generate export_app with PascalCase name derived from plugin name.
+        // The prefix mounts every route under the plugin's API namespace, so a
+        // handler's URL comes from the declaration rather than its file location.
+        yeollin_plugin::vespera::export_app!(#export_ident, prefix = #api_prefix);
 
         #frontend_path_const
 
@@ -427,6 +486,81 @@ pub fn yeollin_app(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+#[cfg(test)]
+mod api_base_tests {
+    use super::{resolve_api_prefix, PluginDef};
+
+    fn prefix_of(declaration: &str) -> String {
+        let def: PluginDef = syn::parse_str(declaration).expect("declaration must parse");
+        resolve_api_prefix(&def).expect("prefix must resolve")
+    }
+
+    fn error_of(declaration: &str) -> String {
+        let def: PluginDef = syn::parse_str(declaration).expect("declaration must parse");
+        resolve_api_prefix(&def)
+            .expect_err("prefix must be rejected")
+            .to_string()
+    }
+
+    #[test]
+    fn defaults_to_the_plugin_name() {
+        assert_eq!(
+            prefix_of(r#"name: "media-library""#),
+            "/api/media-library"
+        );
+    }
+
+    #[test]
+    fn underscores_become_hyphens() {
+        assert_eq!(prefix_of(r#"name: "media_library""#), "/api/media-library");
+        assert_eq!(
+            prefix_of(r#"name: "x", api_base: "media_library""#),
+            "/api/media-library"
+        );
+    }
+
+    #[test]
+    fn api_base_overrides_the_name() {
+        assert_eq!(
+            prefix_of(r#"name: "auth-users", api_base: "auth""#),
+            "/api/auth"
+        );
+    }
+
+    #[test]
+    fn surrounding_slashes_are_tolerated() {
+        assert_eq!(prefix_of(r#"name: "x", api_base: "/auth/""#), "/api/auth");
+    }
+
+    #[test]
+    fn nested_bases_are_kept() {
+        assert_eq!(
+            prefix_of(r#"name: "x", api_base: "v1/reports""#),
+            "/api/v1/reports"
+        );
+    }
+
+    #[test]
+    fn a_leading_api_segment_is_rejected() {
+        // Accepting it would silently produce `/api/api/...`.
+        for declaration in [
+            r#"name: "x", api_base: "api/auth""#,
+            r#"name: "x", api_base: "/api/auth""#,
+            r#"name: "x", api_base: "API/auth""#,
+        ] {
+            assert!(
+                error_of(declaration).contains("must not start with `api`"),
+                "expected rejection for {declaration}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_base_is_rejected() {
+        assert!(error_of(r#"name: "x", api_base: "/""#).contains("must not be empty"));
+    }
 }
 
 #[cfg(test)]

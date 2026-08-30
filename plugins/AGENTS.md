@@ -77,6 +77,33 @@ Each plugin has `tsconfig.json` extending `packages/app/tsconfig.json`:
 - Page discovery: a directory is a route when it contains `page.tsx`
 - Menus and access rules: declared in `route.meta.json` next to `page.tsx`
 
+### API namespace
+
+Every plugin API is mounted under `/api/<base>`, where `<base>` defaults to the
+plugin's `name`. The frontend already uses the same name, so one declaration
+gives `/<name>` for pages and `/api/<name>` for the API.
+
+```rust
+yeollin_plugin! { name: "media-library" }              // -> /api/media-library
+yeollin_plugin! { name: "auth-users", api_base: "auth" } // -> /api/auth
+```
+
+`api_base` is only for when the URL namespace should differ from the name. It
+must NOT contain `api` — that segment is structural and always prepended.
+Underscores become hyphens, since `-` is the URL convention.
+
+**Handler files no longer shape the URL.** The namespace comes from the
+declaration and is prepended to whatever the module path yields, so put handlers
+in `src/routes/mod.rs` to sit at the namespace root:
+
+```
+src/routes/mod.rs      #[vespera::route(get, path = "/items")] -> /api/<base>/items
+src/routes/reports.rs  #[vespera::route(get, path = "/")]      -> /api/<base>/reports/
+```
+
+A nested `src/routes/api/<name>/` layout is wrong now — it would produce
+`/api/<base>/api/<name>/...`.
+
 ### route.meta.json
 
 ```json
@@ -131,3 +158,6 @@ Steps:
 - **NO** manual menu.json (generated from page.tsx + route.meta.json)
 - **NO** `route.ts` config files (replaced by `route.meta.json`)
 - **NO** relying on `(public)` / `(guest)` directory names for access control
+- **NO** `src/routes/api/<name>/` nesting — the namespace is already prepended
+- **NO** `api` inside `api_base`, and **NO** backend route outside `/api`
+- **NO** underscores in URLs — they are converted to hyphens

@@ -17,7 +17,7 @@ interface MemoForm {
 }
 
 async function fetchMemoList(): Promise<Memo[]> {
-  const response = await fetch('/memo')
+  const response = await fetch('/api/example-memo-plugin')
   if (!response.ok) {
     throw new Error('Failed to fetch memos')
   }
@@ -91,7 +91,9 @@ export default function MemoListPage() {
     setError('')
 
     try {
-      const url = editingMemo ? `/memo/${editingMemo.id}` : '/memo'
+      const url = editingMemo
+        ? `/api/example-memo-plugin/${editingMemo.id}`
+        : '/api/example-memo-plugin'
       const method = editingMemo ? 'PATCH' : 'POST'
 
       const response = await fetch(url, {
@@ -120,7 +122,9 @@ export default function MemoListPage() {
     }
 
     try {
-      const response = await fetch(`/memo/${id}`, { method: 'DELETE' })
+      const response = await fetch(`/api/example-memo-plugin/${id}`, {
+        method: 'DELETE',
+      })
       if (!response.ok) {
         const data = await response.json()
         throw new Error(data.error || 'Failed to delete memo')

@@ -1,4 +1,4 @@
-//! /api/auth routes backed by the users and sessions tables.
+//! auth plugin routes, mounted under the plugin API namespace.
 
 use std::net::SocketAddr;
 use std::sync::Arc;

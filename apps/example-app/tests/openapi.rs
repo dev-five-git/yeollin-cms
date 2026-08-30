@@ -51,8 +51,8 @@ fn documented_responses_reference_named_schemas() {
     // Each of these handlers returns a named type. A bare object here means the
     // return type stopped being resolvable, not that the endpoint changed.
     for (path, method) in [
-        ("/memo", "get"),
-        ("/memo/{id}", "get"),
+        ("/api/example-memo-plugin", "get"),
+        ("/api/example-memo-plugin/{id}", "get"),
         ("/api/auth/login", "post"),
         ("/api/auth/me", "get"),
     ] {
@@ -84,6 +84,50 @@ fn every_reference_resolves_to_a_component() {
         assert!(
             spec["components"]["schemas"].get(name).is_some(),
             "{reference} points at a component that is not in the document"
+        );
+    }
+}
+
+#[test]
+fn every_plugin_route_lives_under_its_declared_namespace() {
+    let spec = spec();
+
+    let paths: Vec<&str> = spec["paths"]
+        .as_object()
+        .expect("paths must be an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+
+    // A plugin's public URL comes from its `name` (or `api_base`), never from
+    // where its handler files happen to sit. Moving a handler must not move
+    // the endpoint, so the full set is pinned here.
+    let mut actual: Vec<&str> = paths.clone();
+    actual.sort_unstable();
+
+    assert_eq!(
+        actual,
+        vec![
+            "/api/auth/login",
+            "/api/auth/logout",
+            "/api/auth/me",
+            "/api/auth/refresh",
+            "/api/dashboard/stats",
+            "/api/example-memo-plugin",
+            "/api/example-memo-plugin/{id}",
+            "/api/example-plugin/items/",
+            "/api/example-plugin/items/{id}",
+        ]
+    );
+
+    for path in paths {
+        assert!(
+            path.starts_with("/api/"),
+            "{path} is a backend route and must live under /api"
+        );
+        assert!(
+            !path.contains('_'),
+            "{path} should use hyphens; underscores are not the URL convention"
         );
     }
 }

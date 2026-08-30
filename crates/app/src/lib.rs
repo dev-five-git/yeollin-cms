@@ -11,7 +11,7 @@
 //! async fn main() {
 //!     let app = yeollin::app()
 //!         .with_auth(AuthConfig::new(std::env::var("JWT_SECRET").unwrap()))
-//!         .register_plugin(auth_users::metadata())
+//!         .register_plugin(auth::metadata())
 //!         .register_plugin(my_plugin::metadata())
 //!         .build();
 //!

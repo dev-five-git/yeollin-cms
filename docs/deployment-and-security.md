@@ -49,9 +49,9 @@ Default token lifetimes are one hour for access tokens and seven days for refres
 tokens. Both are configurable on `AuthConfig` through `access_token_expiry` and
 `refresh_token_expiry`.
 
-## Credentials live in the `auth-users` plugin
+## Credentials live in the `auth` plugin
 
-The framework has no credential store. The `auth-users` plugin owns the `users`
+The framework has no credential store. the `auth` plugin owns the `users`
 and `sessions` tables and exposes the auth endpoints. Remove the plugin and there
 is no way to sign in; the framework does not fall back to anything.
 
@@ -97,7 +97,7 @@ Whether a token was valid is not the caller's business.
 
 ## Bootstrapping the first administrator
 
-`auth-users` seeds one administrator from the environment, and only while the
+`auth` seeds one administrator from the environment, and only while the
 `users` table is empty:
 
 | Variable | Purpose |
@@ -169,7 +169,7 @@ routes the application itself might still answer.
 Do not enable the dev proxy in production.
 
 Exempt files are matched exactly, never by suffix. Matching `.ico` as a suffix
-would have let `/memo/1.ico` reach a handler unauthenticated; the tests in
+would have let `/api/example-memo-plugin/1.ico` reach a handler unauthenticated; the tests in
 `crates/auth/src/middleware.rs` lock that behaviour down, along with the
 traversal and prefix cases above.
 

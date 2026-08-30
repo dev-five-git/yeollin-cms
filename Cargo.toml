@@ -9,7 +9,7 @@ members = [
     "crates/cli",
     "plugins/example-plugin",
     "plugins/example-memo-plugin",
-    "plugins/auth-users",
+    "plugins/auth",
     "apps/example-app",
 ]
 

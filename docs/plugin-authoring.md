@@ -20,26 +20,26 @@ subdirectory.
 
 ```
 plugins/example-memo-plugin/
-â”œâ”€â”€ Cargo.toml                          # crate manifest, at the root
-â”œâ”€â”€ package.json                        # devDependencies for TypeScript DX
-â”œâ”€â”€ tsconfig.json                       # extends packages/app/tsconfig.json
-â”œâ”€â”€ vespertide.json                     # database model + migration config
-â”œâ”€â”€ models/
-â”‚   â””â”€â”€ memo.json                       # model definition
-â”œâ”€â”€ migrations/
-â”‚   â””â”€â”€ 0001_initial.vespertide.json    # generated migration
-â”œâ”€â”€ src/
-â”‚   â”œâ”€â”€ lib.rs                          # yeollin_plugin! macro
-â”‚   â”œâ”€â”€ models/
-â”‚   â”‚   â”œâ”€â”€ mod.rs
-â”‚   â”‚   â””â”€â”€ memo.rs                     # generated sea-orm entity
-â”‚   â””â”€â”€ routes/
-â”‚       â”œâ”€â”€ mod.rs
-â”‚       â””â”€â”€ memo.rs                     # Vespera route handlers
-â””â”€â”€ app/
-    â””â”€â”€ (memo)/
-        â”œâ”€â”€ page.tsx                    # frontend page
-        â””â”€â”€ route.meta.json             # label, order, access, menu
+?œâ??€ Cargo.toml                          # crate manifest, at the root
+?œâ??€ package.json                        # devDependencies for TypeScript DX
+?œâ??€ tsconfig.json                       # extends packages/app/tsconfig.json
+?œâ??€ vespertide.json                     # database model + migration config
+?œâ??€ models/
+??  ?”â??€ memo.json                       # model definition
+?œâ??€ migrations/
+??  ?”â??€ 0001_initial.vespertide.json    # generated migration
+?œâ??€ src/
+??  ?œâ??€ lib.rs                          # yeollin_plugin! macro
+??  ?œâ??€ models/
+??  ??  ?œâ??€ mod.rs
+??  ??  ?”â??€ memo.rs                     # generated sea-orm entity
+??  ?”â??€ routes/
+??      ?œâ??€ mod.rs
+??      ?”â??€ memo.rs                     # Vespera route handlers
+?”â??€ app/
+    ?”â??€ (memo)/
+        ?œâ??€ page.tsx                    # frontend page
+        ?”â??€ route.meta.json             # label, order, access, menu
 ```
 
 Standalone applications under `apps/` use the same layout, with `src/main.rs`
@@ -125,12 +125,12 @@ crate manifest, the macro generates one for you that runs
 `vespertide::vespertide_migration!(&db)`. That is why `example-memo-plugin` never
 writes an initialiser: its migrations are applied automatically at startup.
 
-Pass `on_init` explicitly when you need more. `auth-users` does exactly that, to
+Pass `on_init` explicitly when you need more. `auth` does exactly that, to
 run migrations *and* seed the first administrator:
 
 ```rust
 yeollin_plugin::yeollin_plugin! {
-    name: "auth-users",
+    name: "auth",
     author: "DevFive",
     description: "Database-backed users and sessions",
     on_init: initialize,
@@ -150,65 +150,52 @@ If it returns an error, startup fails with the plugin name attached.
 
 ## API routes: how URLs are derived
 
-Two things decide an API route's URL:
+Every plugin API lives under `/api/<base>`:
 
-1. **The module path under `src/routes/`** forms the URL base.
-2. **The macro's `path` argument** is appended to that base.
+1. **`<base>` comes from the plugin declaration** ??the `name`, or `api_base` when
+   you set it. `/api` is always prepended and must not appear in `api_base`.
+2. **The module path under `src/routes/`** is appended to that namespace.
+3. **The macro's `path` argument** is appended last.
 
-Nothing else contributes. The plugin name does *not* prefix API routes.
-
-### Verifying it against `example-plugin`
-
-The module chain is declared file by file:
-
-```rust
-// src/lib.rs
-mod routes;
-
-// src/routes/mod.rs
-pub mod api;
-
-// src/routes/api/mod.rs
-pub mod example;
-
-// src/routes/api/example/mod.rs
-pub mod items;
-```
-
-So `src/routes/api/example/items.rs` sits at the module path `api::example::items`,
-giving the base `/api/example/items`. Inside that file:
+The frontend already derives its pages from the same `name`, so one declaration
+gives `/<name>` for pages and `/api/<name>` for the API.
 
 ```rust
-#[vespera::route(get, path = "/", tags = ["example"])]
-pub async fn list() -> Json<Vec<ExampleItem>> { /* ... */ }
-
-#[vespera::route(get, path = "/{id}", tags = ["example"])]
-pub async fn get(Path(id): Path<String>)
-    -> Result<Json<ExampleItem>, StatusCode> { /* ... */ }
+yeollin_plugin! { name: "media-library" }
+// pages at /media-library, API under /api/media-library
 ```
 
-| Handler | Base from module path | `path` | URL |
-|---------|----------------------|--------|-----|
-| `list` | `/api/example/items` | `/` | `GET /api/example/items` |
-| `get` | `/api/example/items` | `/{id}` | `GET /api/example/items/{id}` |
+Set `api_base` only when the URL namespace should differ from the name:
 
-A `mod.rs` contributes its *directory* name. `auth-users` puts its handlers in
-`src/routes/api/auth/mod.rs`, which is the module path `api::auth`, so
-`path = "/login"` there produces `POST /api/auth/login`.
+```rust
+yeollin_plugin! { name: "reporting-suite", api_base: "reports" }  // -> /api/reports
+```
 
-Omitting `path` leaves the base untouched. `example-memo-plugin` keeps its
-handlers in `src/routes/memo.rs`, base `/memo`, so:
+Underscores become hyphens, because `-` is the URL convention: `media_library`
+and `media-library` both produce `/api/media-library`.
 
-| Handler | `path` | URL |
-|---------|--------|-----|
-| `list_memos` | omitted | `GET /memo` |
-| `create_memo` | omitted | `POST /memo` |
-| `get_memo` | `/{id}` | `GET /memo/{id}` |
-| `update_memo` | `/{id}` | `PATCH /memo/{id}` |
-| `delete_memo` | `/{id}` | `DELETE /memo/{id}` |
+### Placing handlers
 
-Pick your module path deliberately: it *is* your URL space. If you want your
-endpoints under `/api/`, put them in `src/routes/api/`.
+Handlers in `src/routes/mod.rs` sit at the namespace root, which is usually what
+you want. A file adds its own segment.
+
+For a plugin whose base resolves to `/api/example-plugin`:
+
+| Handler location | `path` | URL |
+|---|---|---|
+| `src/routes/mod.rs` | omitted | `/api/example-plugin` |
+| `src/routes/mod.rs` | `/{id}` | `/api/example-plugin/{id}` |
+| `src/routes/items.rs` | `/` | `/api/example-plugin/items/` |
+| `src/routes/items.rs` | `/{id}` | `/api/example-plugin/items/{id}` |
+
+`example-memo-plugin` keeps all five CRUD handlers in `src/routes/mod.rs`, so
+they land on `/api/example-memo-plugin` and `/api/example-memo-plugin/{id}`.
+
+Do **not** nest a `src/routes/api/<name>/` directory. The namespace is already
+prepended, so that would produce `/api/<base>/api/<name>/...`.
+
+Because the URL comes from the declaration rather than the file tree, moving a
+handler between files does not change its published endpoint.
 
 ### A handler
 
@@ -253,9 +240,9 @@ conventions. A directory becomes a route when it contains `page.tsx`.
 
 ```
 app/
-â””â”€â”€ (memo)/
-    â”œâ”€â”€ page.tsx
-    â””â”€â”€ route.meta.json
+?”â??€ (memo)/
+    ?œâ??€ page.tsx
+    ?”â??€ route.meta.json
 ```
 
 A plugin's frontend URL prefix comes from the `name` field in `yeollin_plugin!`,
@@ -277,7 +264,7 @@ and calls its own API with `fetch`:
 import { Box, Flex, Text, VStack } from '@devup-ui/react'
 
 async function fetchMemoList(): Promise<Memo[]> {
-  const response = await fetch('/memo')
+  const response = await fetch('/api/example-memo-plugin')
   if (!response.ok) {
     throw new Error('Failed to fetch memos')
   }
@@ -366,7 +353,7 @@ migration files that run at startup.
 `modelExportDir` is where the generated sea-orm entities land, which is why
 `src/models/memo.rs` exists but is not written by hand. `prefix` namespaces the
 plugin's tables so two plugins can both own a table called `memos` without
-colliding. `auth-users` uses the prefix `auth_`.
+colliding. `auth` uses the prefix `auth_`.
 
 The presence of this file is also what makes `yeollin_plugin!` generate an
 `on_init` that applies migrations.
@@ -391,7 +378,7 @@ The presence of this file is also what makes `yeollin_plugin!` generate an
 }
 ```
 
-Add a `constraints` array for uniqueness. `auth-users` uses it to keep usernames
+Add a `constraints` array for uniqueness. `auth` uses it to keep usernames
 and refresh-token hashes unique:
 
 ```json
@@ -469,7 +456,7 @@ First, add the dependency to its `Cargo.toml`:
 yeollin-app = { path = "../../crates/app" }
 example-plugin = { path = "../../plugins/example-plugin" }
 example-memo-plugin = { path = "../../plugins/example-memo-plugin" }
-auth-users = { path = "../../plugins/auth-users" }
+auth = { path = "../../plugins/auth" }
 ```
 
 Then add its module path to the `plugins` list in `yeollin_app!`. Note the

@@ -1,9 +1,9 @@
 [package]
-name = "auth-users"
+name = "auth"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Database-backed users and sessions for Yeollin CMS authentication"
+description = "Database-backed users and sessions for Yeollin CMS"
 
 [dependencies]
 yeollin-plugin = { path = "../../crates/plugin" }

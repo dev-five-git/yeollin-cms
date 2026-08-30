@@ -12,4 +12,4 @@ yeollin_plugin::yeollin_plugin! {
 }
 
 // Re-export types for external use
-pub use routes::api::example::items::ExampleItem;
+pub use routes::items::ExampleItem;
