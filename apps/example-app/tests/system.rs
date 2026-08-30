@@ -992,6 +992,228 @@ async fn assembled_system_manages_typed_content_publication() {
 }
 
 #[tokio::test]
+async fn assembled_system_indexes_and_searches_content_on_every_write() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+
+    let anonymous = client
+        .get(server.url("/api/search?q=handbook"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), 401, "search is authenticated");
+
+    let token = admin_token(&client, &server).await;
+    for path in ["/api/search", "/api/search?q=---"] {
+        let invalid = client
+            .get(server.url(path))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), 400, "invalid search input is refused");
+    }
+
+    let first = client
+        .post(server.url("/api/content/pages"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Constellation handbook",
+            "slug": "constellation-handbook",
+            "fields": {
+                "excerpt": "A guide for stargazers",
+                "body": "Observe the northern sky and record each sighting.",
+                "heroImage": null,
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 200);
+    let first: Value = first.json().await.unwrap();
+    let first_id = first["id"].as_str().unwrap();
+
+    let second = client
+        .post(server.url("/api/content/pages"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Routine guide",
+            "slug": "routine-guide",
+            "fields": {
+                "excerpt": "Reference material",
+                "body": "The constellation appears here only in the body.",
+                "heroImage": null,
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 200);
+    let second: Value = second.json().await.unwrap();
+
+    let ranked: Value = client
+        .get(server.url("/api/search?q=constell&pageSize=1"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(ranked["total"], 2);
+    assert_eq!(ranked["page"], 1);
+    assert_eq!(ranked["pageSize"], 1);
+    assert_eq!(ranked["results"][0]["id"], first_id);
+    assert_eq!(ranked["results"][0]["subject"], "content");
+    assert_eq!(ranked["results"][0]["collection"], "pages");
+    assert_eq!(ranked["results"][0]["status"], "draft");
+    assert_eq!(ranked["results"][0]["url"], "/content/pages");
+    assert!(ranked["results"][0]["relevance"].as_f64().is_some());
+
+    let second_page: Value = client
+        .get(server.url("/api/search?q=constell&page=2&pageSize=1"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(second_page["total"], 2);
+    assert_eq!(second_page["results"][0]["id"], second["id"]);
+
+    let collection_filtered: Value = client
+        .get(server.url("/api/search?q=constell&collection=other"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(collection_filtered["total"], 0);
+    let invalid_collection = client
+        .get(server.url("/api/search?q=constell&collection=../../pages"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid_collection.status(), 400);
+
+    let updated = client
+        .put(server.url(&format!("/api/content/pages/{first_id}")))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Telemetry handbook",
+            "slug": "telemetry-handbook",
+            "fields": {
+                "excerpt": "Instrumentation reference",
+                "body": "Trace every request and inspect service metrics.",
+                "heroImage": null,
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), 200);
+
+    let old_term: Value = client
+        .get(server.url("/api/search?q=constell"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(old_term["total"], 1, "updated terms leave the index");
+    assert_eq!(old_term["results"][0]["id"], second["id"]);
+
+    let new_term: Value = client
+        .get(server.url("/api/search?q=telemet&status=draft"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(new_term["total"], 1, "updates are searchable immediately");
+    assert_eq!(new_term["results"][0]["id"], first_id);
+
+    let published = client
+        .post(server.url(&format!("/api/content/pages/{first_id}/publish")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(published.status(), 200);
+    let published_only: Value = client
+        .get(server.url("/api/search?q=telemet&status=published"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(published_only["total"], 1);
+    let draft_only: Value = client
+        .get(server.url("/api/search?q=telemet&status=draft"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(draft_only["total"], 0);
+
+    let account = client
+        .post(server.url("/api/auth/users"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "username": "search-reader",
+            "password": "search-reader-password",
+            "role": "user",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(account.status(), 200);
+    let user_tokens: Value = login_as(&client, &server, "search-reader", "search-reader-password")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let forbidden = client
+        .get(server.url("/api/search?q=telemet"))
+        .bearer_auth(user_tokens["access_token"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), 403, "draft-aware search requires admin");
+
+    let deleted = client
+        .delete(server.url(&format!("/api/content/pages/{first_id}")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), 200);
+    let removed: Value = client
+        .get(server.url("/api/search?q=telemet"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(removed["total"], 0, "deletes leave no stale search row");
+}
+
+#[tokio::test]
 async fn assembled_system_configures_signs_and_retries_webhooks() {
     let server = start().await;
     let client = reqwest::Client::new();

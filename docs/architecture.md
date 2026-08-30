@@ -155,6 +155,17 @@ Prebuild uses only exported schema/default data to assemble the generic editor;
 the public endpoint is a fixed exact path and filters to `published` in the
 database query.
 
+The `search` plugin keeps a normal `search_documents` projection beside an
+external-content SQLite FTS5 virtual table. Content is the first indexed
+subject. Startup creates the FTS table and triggers, synchronizes every existing
+content snapshot, removes stale content documents, and rebuilds the virtual
+index. After startup, one Inline subscriber handles the five exact `content.*`
+write events. Its projection update shares the content transaction, so a failed
+index write rolls back the content write instead of leaving search stale. FTS5
+ranks title matches above flattened scalar field values; the administrator-only
+API adds bounded, operator-safe prefix terms plus exact collection/status
+filters. No network service or second persistence system participates.
+
 Embedded frontend output remains read-only. Plugins that declare
 `runtime_storage: true` receive a `RuntimeStorage` extension backed by the
 application's `with_storage_dir` root. `YeollinApp::run` creates that directory

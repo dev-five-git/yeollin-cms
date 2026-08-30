@@ -119,6 +119,19 @@
         "vinext": "^1.0.0-beta.8",
       },
     },
+    "plugins/search": {
+      "name": "@yeollin-plugin/search",
+      "version": "0.1.0",
+      "dependencies": {
+        "@devup-ui/react": "^1.0.41",
+        "react": "^19.2.8",
+      },
+      "devDependencies": {
+        "@types/react": "^19",
+        "typescript": "^7.0",
+        "vinext": "^1.0.0-beta.8",
+      },
+    },
     "plugins/webhooks": {
       "name": "@yeollin-plugin/webhooks",
       "version": "0.1.0",
@@ -539,6 +552,8 @@
     "@yeollin-plugin/example-plugin": ["@yeollin-plugin/example-plugin@workspace:plugins/example-plugin"],
 
     "@yeollin-plugin/media": ["@yeollin-plugin/media@workspace:plugins/media"],
+
+    "@yeollin-plugin/search": ["@yeollin-plugin/search@workspace:plugins/search"],
 
     "@yeollin-plugin/webhooks": ["@yeollin-plugin/webhooks@workspace:plugins/webhooks"],
 

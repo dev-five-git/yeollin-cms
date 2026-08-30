@@ -36,15 +36,25 @@ export async function Sidebar() {
   return (
     <Box
       bg="$background"
-      borderRight="1px solid $border"
+      borderBottom={['1px solid $border', null, 'none']}
+      borderRight={['none', null, '1px solid $border']}
       display="flex"
-      flexDirection="column"
-      h="100vh"
-      p={4}
-      w="260px"
+      flexDirection={['row', null, 'column']}
+      flexShrink={0}
+      h={['auto', null, '100vh']}
+      overflowX={['auto', null, 'visible']}
+      overflowY="hidden"
+      p={[2, null, 4]}
+      w={['100%', null, '260px']}
     >
       {/* Logo */}
-      <Flex alignItems="center" gap={2} mb={6} px={2}>
+      <Flex
+        alignItems="center"
+        display={['none', null, 'flex']}
+        gap={2}
+        mb={6}
+        px={2}
+      >
         <Box
           alignItems="center"
           bg="$primary"
@@ -62,18 +72,31 @@ export async function Sidebar() {
       </Flex>
 
       {/* Plugin Navigation */}
-      <Flex flex={1} flexDirection="column" gap={1}>
+      <Flex flex={[0, null, 1]} flexDirection={['row', null, 'column']} gap={1}>
         {pluginMenuItems.map((item) => (
           <NavItem key={item.id} item={item} />
         ))}
       </Flex>
 
       {/* System Navigation */}
-      <Box borderTop="1px solid $border" mt={4} pt={4}>
-        <Text color="$textTertiary" mb={2} px={2} typography="label">
+      <Box
+        borderLeft={['1px solid $border', null, 'none']}
+        borderTop={['none', null, '1px solid $border']}
+        ml={[2, null, 0]}
+        mt={[0, null, 4]}
+        pl={[2, null, 0]}
+        pt={[0, null, 4]}
+      >
+        <Text
+          color="$textTertiary"
+          display={['none', null, 'block']}
+          mb={2}
+          px={2}
+          typography="label"
+        >
           System
         </Text>
-        <Flex flexDirection="column" gap={1}>
+        <Flex flexDirection={['row', null, 'column']} gap={1}>
           {systemMenuItems.map((item) => (
             <NavItem key={item.id} item={item} />
           ))}

@@ -27,6 +27,7 @@ audit-log = { path = "../../plugins/audit-log" }
 media = { path = "../../plugins/media" }
 content = { path = "../../plugins/content" }
 webhooks = { path = "../../plugins/webhooks" }
+search = { path = "../../plugins/search" }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json", "multipart"] }
