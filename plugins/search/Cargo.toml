@@ -1,0 +1,21 @@
+[package]
+name = "search"
+version = "0.1.0"
+edition = "2021"
+description = "SQLite FTS5 content search for Yeollin CMS"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+yeollin-plugin = { workspace = true }
+vespera = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+sea-orm = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

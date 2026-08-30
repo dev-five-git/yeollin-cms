@@ -1,0 +1,6 @@
+{
+  "label": "Search",
+  "order": 50,
+  "access": "authenticated",
+  "menu": true
+}

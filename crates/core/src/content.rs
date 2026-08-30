@@ -3,8 +3,8 @@
 use std::{marker::PhantomData, str::FromStr};
 
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, ModelTrait,
-    Order, PaginatorTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    IntoActiveModel, ModelTrait, Order, PaginatorTrait, QueryFilter, QueryOrder, Set,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -600,6 +600,35 @@ impl ContentSnapshot {
             published_at: record.published_at.clone(),
         })
     }
+}
+
+/// Read every content entry without requiring its collection-specific field type.
+///
+/// Search uses this at startup to populate a newly installed index. Ongoing
+/// writes stay synchronized through the typed content events below.
+pub async fn list_content_snapshots<C>(db: &C) -> Result<Vec<ContentSnapshot>, ContentError>
+where
+    C: ConnectionTrait,
+{
+    content_entries::Entity::find()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|model| {
+            Ok(ContentSnapshot {
+                id: model.id,
+                collection: model.collection,
+                title: model.title,
+                slug: model.slug,
+                status: ContentStatus::from_str(&model.status)?,
+                author: model.author,
+                fields: model.fields,
+                created_at: model.created_at.to_rfc3339(),
+                updated_at: model.updated_at.to_rfc3339(),
+                published_at: model.published_at.map(|value| value.to_rfc3339()),
+            })
+        })
+        .collect()
 }
 
 macro_rules! content_event {
