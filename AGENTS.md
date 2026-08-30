@@ -63,6 +63,12 @@ yeollin_plugin::yeollin_plugin! {
 }
 ```
 
+### Transactional Events
+- Implement `Event` with a stable `NAME`, then write and emit through one `EventTransaction`
+- Inline subscribers share that transaction; failure aborts it, and nested emission is refused
+- Deferred subscribers run from the `events` outbox after commit; delivery is at-least-once
+- Inline is database-only. Network and filesystem work is always Deferred
+
 ### Dev Mode (Single Port)
 - Port 3001: Rust API + dev proxy
 - Port 3000: Internal vinext dev server (proxied)
@@ -86,6 +92,7 @@ yeollin_plugin::yeollin_plugin! {
 - **URLs use hyphens**: underscores in path segments are converted to `-`
 - **Routes**: Vespera macros `#[vespera::route(get, path = "...", tags = ["..."])]`
 - **State**: Extension layer for SharedMenus, SharedPlugins
+- **Events**: `EventBus` extension; action work and `emit` use the same `EventTransaction`
 - **Logs go to stderr**: stdout is reserved for the `YEOLLIN_EXPORT` envelope
 - **Authorization is opt-in per handler**: the middleware authenticates, it does not
   authorize. Guard admin/destructive routes with `current.require_role("admin")?`

@@ -26,6 +26,7 @@ crates/
 | Modify app builder | `app/src/app.rs` | YeollinAppBuilder methods |
 | Add CLI command | `cli/src/commands/` | New module + update mod.rs |
 | Route metadata / menus | `core/src/route.rs` | `compile_route_manifest()`, `build_menu()` |
+| Event bus / outbox | `core/src/events.rs` | Typed emit, Inline dispatch, Deferred drainer |
 | App ↔ CLI metadata contract | `core/src/export.rs` | `ExportEnvelope`, `EXPORT_ENV_VAR` |
 | Read metadata from a binary | `cli/src/commands/prebuild.rs` | `export_metadata()`, `parse_export_envelope()` |
 | Crate detection | `cli/src/commands/prebuild.rs` | `detect_crate_dir()` for flat/legacy support |
@@ -65,6 +66,7 @@ opened lazily and export stays side-effect free.
 | Type | Crate | Purpose |
 |------|-------|---------|
 | `PluginMetadata` | plugin | Plugin definition (routes + frontend) |
+| `EventBus` / `EventTransaction` | core | Transactional event outbox and delivery |
 | `YeollinAppBuilder` | app | Fluent API for CMS setup |
 | `PluginInfo` | cli | Serializable plugin data for JSON |
 | `PluginFrontend` | cli | Frontend paths for prebuild |
@@ -95,6 +97,8 @@ fn detect_crate_dir(base: &Path) -> Option<PathBuf> {
 - Re-exports via `pub use` in lib.rs
 - Vespera for OpenAPI route generation
 - Extension layer for shared state (SharedMenus, SharedPlugins)
+- `EventBus` is an Extension; event-producing writes use `EventTransaction::connection()`
+- Inline subscriber errors abort the action; Deferred delivery wakes after commit and also polls
 - **Plugin frontend path**: `concat!(env!("CARGO_MANIFEST_DIR"), "/app")` (flat structure)
 
 ## CLI COMMANDS

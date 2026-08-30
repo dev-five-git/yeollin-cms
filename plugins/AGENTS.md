@@ -92,6 +92,16 @@ Cargo resolves the dependency graph before proc macros run, so a plugin cannot b
 discovered at compile time. `plugin doctor` exists because half a registration
 either fails to compile or silently omits the plugin's routes and migrations.
 
+## EVENT SUBSCRIBERS
+
+Declare observe-only subscribers with the `subscribers` list on
+`yeollin_plugin!`. Filters are exact event names; an empty list observes all.
+Inline subscribers receive the action's `DatabaseTransaction`, must only write
+to that database, cannot emit, and abort the action on error. Network,
+filesystem, and external-service work must be Deferred. Deferred delivery comes
+from the committed `events` outbox and is at-least-once, so handlers must be
+idempotent.
+
 ## TYPESCRIPT SETUP
 
 Each plugin has `tsconfig.json` extending `packages/app/tsconfig.json`:
