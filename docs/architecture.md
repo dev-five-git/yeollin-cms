@@ -136,6 +136,17 @@ in place. Its retention pass deletes only processed, marked rows so the outbox
 remains the single source of truth and pending delivery is never treated as a
 disposable log.
 
+The `webhooks` plugin attaches one Deferred subscriber to that drainer. It
+materializes a stable row per `(endpoint, event)`, which is the idempotency
+boundary: endpoints already marked delivered are skipped while a failed peer
+retries. The shared outbox schedules failures with capped exponential backoff;
+the endpoint row records the response status, error, attempts, and terminal
+dead-letter state. A manual retry resets that row and makes the immutable source
+event immediately available again. HMAC-SHA256 covers the exact envelope bytes.
+Network delivery disables redirects, applies a per-endpoint timeout, validates
+every resolved address against the default private/loopback/link-local denylist,
+and pins accepted DNS answers for the connection.
+
 The same core migration owns `content_entries`. A plugin collection registers a
 concrete Rust field type, generated handlers, and its build-time schema. Runtime
 writes round-trip that concrete type through the shared JSON field while the

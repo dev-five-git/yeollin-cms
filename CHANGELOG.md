@@ -9,6 +9,7 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Security
 
+- Webhook delivery signs the exact event envelope with HMAC-SHA256, disables redirects, enforces a per-request timeout, and blocks private, loopback, link-local, unspecified, multicast, and IPv6 unique-local destinations by default. Validated DNS answers are pinned to prevent rebinding; private-network delivery requires an explicit per-endpoint opt-out.
 - Authentication middleware no longer exempts any path ending in `.ico`. Only exact-match files such as `/favicon.ico` are exempt.
 - Vite dev-server asset paths (`/@`, `/__vite_hmr`, `/node_modules/`, `/src/`, `/df/`) now skip authentication only while the dev proxy is active.
 - Public and guest route matching is whole-path exact instead of prefix-based, and the server refuses to start unless `JWT_SECRET` is at least 32 bytes.
@@ -21,6 +22,7 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Added
 
+- The `webhooks` plugin adds administrator endpoint CRUD, write-only signing secrets, exact event-name filters, per-endpoint delivery history, five-attempt dead letters, and explicit manual retries. Successful endpoints are not resent when another endpoint fails.
 - Compile-time typed content collections through `yeollin_content_collection!` and the `collections` plugin declaration. Collection field types drive concrete handlers, validation, exported schemas, and generated editor pages while the framework owns IDs, collection-scoped slugs, author, and timestamps.
 - A shared draft/published content repository with paginated administrator CRUD, transactional `content.created` / `updated` / `published` / `unpublished` / `deleted` audit events, and an exact public-by-slug endpoint that exposes only published entries. The reference `content` plugin ships a typed `pages` collection with media-reference validation.
 - The `media` plugin provides an administrator media library, typed multipart image uploads, paginated metadata, deletion, and a public serving route. JPEG, PNG, GIF, and WebP are verified from their signatures; upload size has a 10 MiB hard ceiling and a typed 1–10 MiB setting.
@@ -41,6 +43,7 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Changed
 
+- Deferred outbox failures now retry with exponential backoff capped at five minutes instead of a fixed polling delay.
 - Passwords must be at least 12 **characters** — counted as characters, not bytes, so a short multi-byte password cannot pass. This applies to the bootstrap administrator too, so a deployment whose `YEOLLIN_ADMIN_PASSWORD` is shorter now fails at startup with the reason rather than seeding a weak account.
 - Changing or resetting a password ends every session for that account. A refresh token minted before the change stops working, which is what makes a password change useful for containing a compromise.
 
