@@ -36,11 +36,13 @@ async fn main() -> anyhow::Result<()> {
     // Credentials live in the auth plugin, not here. It seeds the first
     // administrator from YEOLLIN_ADMIN_USERNAME / YEOLLIN_ADMIN_PASSWORD.
     let auth_config = AuthConfig::new(jwt_secret);
+    let storage_dir =
+        std::env::var("YEOLLIN_STORAGE_DIR").unwrap_or_else(|_| "./storage".to_string());
 
     // Create app builder using yeollin_app! macro
     // This macro handles both register_plugin() and vespera merge in one call
     let app = yeollin::yeollin_app! {
-        plugins: [audit_log, auth, example_memo_plugin, example_plugin],
+        plugins: [audit_log, auth, example_memo_plugin, example_plugin, media],
         openapi: "openapi.json",
         title: "Example CMS API",
         version: "1.0.0",
@@ -50,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
     .host("0.0.0.0")
     .port(port)
     .with_auth(auth_config)
+    .with_storage_dir(storage_dir)
     // `mode=rwc` creates the file on first run; vespertide provisions the schema
     // on plugin init. Connecting lazily keeps metadata exports side-effect free.
     .with_database_url("sqlite://./db.sqlite?mode=rwc")

@@ -55,6 +55,18 @@ impl PluginError {
         Self::new(StatusCode::CONFLICT, "CONFLICT", message)
     }
 
+    pub fn payload_too_large(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::PAYLOAD_TOO_LARGE, "PAYLOAD_TOO_LARGE", message)
+    }
+
+    pub fn unsupported_media_type(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "UNSUPPORTED_MEDIA_TYPE",
+            message,
+        )
+    }
+
     pub fn too_many_requests(message: impl Into<String>) -> Self {
         Self::new(StatusCode::TOO_MANY_REQUESTS, "TOO_MANY_ATTEMPTS", message)
     }
@@ -147,6 +159,13 @@ impl From<yeollin_core::EventError> for PluginError {
     }
 }
 
+impl From<yeollin_core::StorageError> for PluginError {
+    fn from(error: yeollin_core::StorageError) -> Self {
+        tracing::error!(%error, "plugin runtime storage error");
+        Self::internal()
+    }
+}
+
 /// Shorthand for helper functions that fail with a [`PluginError`].
 ///
 /// **Do not use this in a `#[vespera::route]` handler signature.** Vespera reads
@@ -165,6 +184,14 @@ mod tests {
         assert_eq!(PluginError::not_found("x").status(), StatusCode::NOT_FOUND);
         assert_eq!(PluginError::not_found("x").code(), "NOT_FOUND");
         assert_eq!(PluginError::conflict("x").status(), StatusCode::CONFLICT);
+        assert_eq!(
+            PluginError::payload_too_large("x").status(),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert_eq!(
+            PluginError::unsupported_media_type("x").status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE
+        );
         assert_eq!(
             PluginError::too_many_requests("x").code(),
             "TOO_MANY_ATTEMPTS"

@@ -1,0 +1,6 @@
+{
+  "label": "Media",
+  "order": 30,
+  "access": "authenticated",
+  "menu": true
+}

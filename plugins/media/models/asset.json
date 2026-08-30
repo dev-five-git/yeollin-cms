@@ -1,0 +1,53 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/model.schema.json",
+  "name": "assets",
+  "description": "Metadata for files held in the runtime media object store",
+  "columns": [
+    {
+      "name": "id",
+      "type": "text",
+      "nullable": false,
+      "primary_key": true
+    },
+    {
+      "name": "reference",
+      "type": "text",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "original_name",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "mime_type",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "size_bytes",
+      "type": "big_int",
+      "nullable": false
+    },
+    {
+      "name": "uploaded_by",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "created_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()",
+      "index": true
+    }
+  ],
+  "constraints": [
+    {
+      "type": "unique",
+      "name": "uq_media_assets_reference",
+      "columns": ["reference"]
+    }
+  ]
+}

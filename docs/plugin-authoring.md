@@ -107,6 +107,9 @@ collected automatically.
 | `api_base` | no | string literal | Override the API namespace derived from `name`; never include `api`. |
 | `settings` | no | Rust type path | Register a typed settings contract and its generated API and page. |
 | `subscribers` | no | expression list | Register observe-only Inline or Deferred event subscribers. |
+| `public_api_routes` | no | string-literal list | Exact, fixed suffixes below this plugin's API namespace that do not require authentication. |
+| `runtime_storage` | no | bool literal | Require the host to configure a writable `RuntimeStorage` extension. |
+| `request_body_limit` | no | byte-count expression | Raise Axum's outer body ceiling; the handler must still enforce its tighter semantic limit. |
 
 Anything else is a compile error: the macro rejects unknown fields.
 
@@ -150,6 +153,64 @@ async fn initialize(db: DatabaseConnection) -> anyhow::Result<()> {
 
 An `on_init` callback runs only when the application has a database configured.
 If it returns an error, startup fails with the plugin name attached.
+
+## Runtime files and multipart uploads
+
+`include_dir!` embeds the static frontend at compile time and cannot hold files
+created after deployment. A plugin that writes runtime objects declares the
+capability and the host chooses a persistent root:
+
+```rust
+const REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024 + 64 * 1024;
+
+yeollin_plugin::yeollin_plugin! {
+    name: "media",
+    runtime_storage: true,
+    request_body_limit: REQUEST_BODY_BYTES,
+    public_api_routes: ["/file"],
+}
+
+let app = yeollin::app()
+    .register_plugin(media::metadata())
+    .with_storage_dir("./storage")
+    .build();
+```
+
+Declaring `runtime_storage: true` makes startup fail clearly when the host omits
+`with_storage_dir`. Merely building or exporting metadata never creates the
+directory. At runtime, handlers extract `RuntimeStorage`; its
+`store_file`, `open_file`, and `remove_file` methods accept only URL-safe
+namespace and opaque-key segments. The settled layout is
+`<root>/<namespace>/objects/<first-two-key-characters>/<key>`. Original
+filenames are metadata only and never become paths.
+
+Vespera provides typed multipart extraction and per-field byte limits:
+
+```rust
+use vespera::multipart::{FieldData, TypedMultipart};
+
+#[derive(vespera::Multipart, vespera::Schema)]
+#[try_from_multipart(strict)]
+struct UploadRequest {
+    #[form_data(limit = "10MiB")]
+    file: FieldData<vespera::tempfile::NamedTempFile>,
+}
+```
+
+The plugin-declared request budget only prevents Axum's 2 MiB default from
+rejecting a legitimate upload before extraction. It is not validation. Keep a
+hard `#[form_data(limit = ...)]`, enforce any lower typed setting in the
+handler, and determine MIME from the bytes rather than trusting the multipart
+header. `media` accepts only JPEG, PNG, GIF, and WebP signatures.
+
+`public_api_routes` contains suffixes, so `"/file"` above resolves to the exact
+path `/api/media/file`. The authentication model is path-based, not
+method-based: the macro rejects `"/"` because making the namespace root public
+would expose every method mounted there. Dynamic segments, wildcards, queries,
+fragments, traversal, and trailing slashes are rejected too. Put an opaque
+reference in the query string when a public lookup is needed. The media plugin
+uses `media:<32-lowercase-hex>` and content must persist that reference, never a
+storage path or serving URL.
 
 ## Typed plugin settings
 

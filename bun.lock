@@ -102,6 +102,19 @@
         "vinext": "^1.0.0-beta.8",
       },
     },
+    "plugins/media": {
+      "name": "@yeollin-plugin/media",
+      "version": "0.1.0",
+      "dependencies": {
+        "@devup-ui/react": "^1.0.41",
+        "react": "^19.2.8",
+      },
+      "devDependencies": {
+        "@types/react": "^19",
+        "typescript": "^7.0",
+        "vinext": "^1.0.0-beta.8",
+      },
+    },
   },
   "packages": {
     "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
@@ -505,6 +518,8 @@
     "@yeollin-plugin/example-memo-plugin": ["@yeollin-plugin/example-memo-plugin@workspace:plugins/example-memo-plugin"],
 
     "@yeollin-plugin/example-plugin": ["@yeollin-plugin/example-plugin@workspace:plugins/example-plugin"],
+
+    "@yeollin-plugin/media": ["@yeollin-plugin/media@workspace:plugins/media"],
 
     "@yeollin/app": ["@yeollin/app@workspace:packages/app"],
 

@@ -39,7 +39,8 @@ pub use yeollin_auth;
 pub use yeollin_core;
 pub use yeollin_core::{
     Event, EventBus, EventEnvelope, EventError, EventTransaction, InlineSubscriberFuture,
-    SettingsError, SettingsRegistration, SettingsStore, SubscriberMode, SubscriberRegistration,
+    RuntimeStorage, SettingsError, SettingsRegistration, SettingsStore, StorageError,
+    SubscriberMode, SubscriberRegistration,
 };
 
 // Re-export commonly used auth types

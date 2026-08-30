@@ -461,6 +461,173 @@ async fn assembled_system_exposes_only_audited_events_to_admins() {
 }
 
 #[tokio::test]
+async fn assembled_system_uploads_serves_and_deletes_runtime_media() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+
+    let anonymous_list = client.get(server.url("/api/media")).send().await.unwrap();
+    assert_eq!(anonymous_list.status(), 401, "the media index is protected");
+
+    let invalid_reference = client
+        .get(server.url("/api/media/file?reference=media:not-valid"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        invalid_reference.status(),
+        404,
+        "the fixed serving route must be public"
+    );
+    let widened = client
+        .get(server.url("/api/media/file/extra?reference=media:not-valid"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        widened.status(),
+        401,
+        "public API declarations must match the whole path"
+    );
+
+    let token = admin_token(&client, &server).await;
+    let rejected = client
+        .post(server.url("/api/media"))
+        .bearer_auth(&token)
+        .multipart(
+            reqwest::multipart::Form::new().part(
+                "file",
+                reqwest::multipart::Part::bytes(b"plain text".to_vec())
+                    .file_name("notes.txt")
+                    .mime_str("text/plain")
+                    .unwrap(),
+            ),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        rejected.status(),
+        415,
+        "MIME is determined from the file signature"
+    );
+
+    let png = b"\x89PNG\r\n\x1a\nmedia-system-test".to_vec();
+    let uploaded = client
+        .post(server.url("/api/media"))
+        .bearer_auth(&token)
+        .multipart(
+            reqwest::multipart::Form::new().part(
+                "file",
+                reqwest::multipart::Part::bytes(png.clone())
+                    .file_name("qa-image.png")
+                    .mime_str("image/png")
+                    .unwrap(),
+            ),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(uploaded.status(), 200);
+    let media: Value = uploaded.json().await.unwrap();
+    let id = media["id"].as_str().expect("media id");
+    let reference = media["reference"].as_str().expect("media reference");
+    let url = media["url"].as_str().expect("public media URL");
+    assert_eq!(reference, format!("media:{id}"));
+    assert_eq!(id.len(), 32);
+    assert!(id.chars().all(|character| character.is_ascii_hexdigit()));
+    assert_eq!(media["mimeType"], "image/png");
+    assert_eq!(media["originalName"], "qa-image.png");
+
+    let object_path = server
+        ._workdir
+        .path()
+        .join("storage")
+        .join("media")
+        .join("objects")
+        .join(&id[..2])
+        .join(id);
+    assert!(
+        object_path.is_file(),
+        "upload bytes must live outside the bundle"
+    );
+
+    let served = client.get(server.url(url)).send().await.unwrap();
+    assert_eq!(served.status(), 200);
+    assert_eq!(served.headers()["content-type"], "image/png");
+    assert_eq!(served.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(served.bytes().await.unwrap().as_ref(), png.as_slice());
+
+    let listed: Value = client
+        .get(server.url("/api/media"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(listed["total"], 1);
+    assert_eq!(listed["media"][0]["reference"], reference);
+
+    let saved_limit = client
+        .put(server.url("/api/media/settings"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "maxUploadMegabytes": 1 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(saved_limit.status(), 200);
+    let mut oversized_png = vec![0_u8; 1024 * 1024 + 1];
+    oversized_png[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+    let oversized = client
+        .post(server.url("/api/media"))
+        .bearer_auth(&token)
+        .multipart(
+            reqwest::multipart::Form::new().part(
+                "file",
+                reqwest::multipart::Part::bytes(oversized_png)
+                    .file_name("oversized.png")
+                    .mime_str("image/png")
+                    .unwrap(),
+            ),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(oversized.status(), 413, "the typed setting lowers the cap");
+
+    let audit: Value = client
+        .get(server.url("/api/audit-log?eventName=media.uploaded"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(audit["total"], 1);
+    assert_eq!(
+        audit["events"][0]["payload"]["media"]["reference"],
+        reference
+    );
+
+    let deleted = client
+        .delete(server.url(&format!("/api/media/{id}")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), 200);
+    assert!(
+        !object_path.exists(),
+        "delete must reclaim the runtime object"
+    );
+
+    let gone = client.get(server.url(url)).send().await.unwrap();
+    assert_eq!(gone.status(), 404);
+}
+
+#[tokio::test]
 async fn assembled_system_manages_accounts() {
     let server = start().await;
     let client = reqwest::Client::new();

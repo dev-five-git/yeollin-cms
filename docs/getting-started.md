@@ -34,8 +34,8 @@ prebuild time and is never the app you run directly.
 ## Run the development server
 
 `apps/example-app` is the standalone application used for local development. It
-registers the `auth`, `example-plugin`, and `example-memo-plugin` crates
-through the `yeollin_app!` macro.
+registers `auth`, `audit-log`, `media`, `example-plugin`, and
+`example-memo-plugin` through the `yeollin_app!` macro.
 
 ```bash
 cd apps/example-app
@@ -154,6 +154,15 @@ because that event type opts into audit history. Filter values are exact event
 names, not prefixes. The generated **audit-log settings** page controls retention
 (90 days by default); both the history API and its setting require the `admin`
 role.
+
+Open **Media library** to upload a JPEG, PNG, GIF, or WebP image. The file is
+written below `./storage/media/objects/`, not into the embedded frontend bundle,
+and the UI returns an opaque `media:<32-lowercase-hex>` reference. Content stores
+that reference rather than a filesystem path or deployment URL. The generated
+**media settings** page controls the upload limit from 1 through 10 MiB (5 MiB
+by default). Listing, upload, settings, and delete require `admin`; the fixed
+`/api/media/file?reference=...` serving path is public so published pages can
+render referenced images.
 
 ## Explore the API docs
 

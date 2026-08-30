@@ -39,6 +39,12 @@ pub struct PluginMetadata {
     pub settings: Option<SettingsRegistration>,
     /// Observe-only event subscribers owned by this plugin.
     pub subscribers: Vec<SubscriberRegistration>,
+    /// Exact API paths that are reachable without authentication.
+    pub public_api_routes: Vec<&'static str>,
+    /// Whether startup must provide writable runtime storage.
+    pub requires_runtime_storage: bool,
+    /// Axum body budget required before stricter route-level validation runs.
+    pub request_body_limit: Option<usize>,
 }
 
 impl PluginMetadata {
@@ -56,6 +62,9 @@ impl PluginMetadata {
             on_init: None,
             settings: None,
             subscribers: vec![],
+            public_api_routes: vec![],
+            requires_runtime_storage: false,
+            request_body_limit: None,
         }
     }
 }
@@ -73,6 +82,9 @@ pub struct PluginMetadataBuilder {
     on_init: Option<PluginInitFn>,
     settings: Option<SettingsRegistration>,
     subscribers: Vec<SubscriberRegistration>,
+    public_api_routes: Vec<&'static str>,
+    requires_runtime_storage: bool,
+    request_body_limit: Option<usize>,
 }
 
 impl PluginMetadataBuilder {
@@ -145,6 +157,26 @@ impl PluginMetadataBuilder {
         self
     }
 
+    /// Declare one fully resolved, exact public API path.
+    pub fn public_api_route(mut self, route: &'static str) -> Self {
+        self.public_api_routes.push(route);
+        self
+    }
+
+    /// Require the host application to configure writable runtime storage.
+    pub fn requires_runtime_storage(mut self) -> Self {
+        self.requires_runtime_storage = true;
+        self
+    }
+
+    /// Raise Axum's request-body ceiling for this plugin.
+    ///
+    /// Handlers must still enforce their own tighter semantic limits.
+    pub fn request_body_limit(mut self, bytes: usize) -> Self {
+        self.request_body_limit = Some(bytes);
+        self
+    }
+
     /// Build the plugin metadata
     pub fn build(self) -> PluginMetadata {
         PluginMetadata {
@@ -159,6 +191,9 @@ impl PluginMetadataBuilder {
             on_init: self.on_init,
             settings: self.settings,
             subscribers: self.subscribers,
+            public_api_routes: self.public_api_routes,
+            requires_runtime_storage: self.requires_runtime_storage,
+            request_body_limit: self.request_body_limit,
         }
     }
 }
