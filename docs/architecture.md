@@ -54,6 +54,7 @@ flowchart TB
             staticS["Static File Server"]
             openapiS["OpenAPI (Vespera)"]
             dbS["SQLite + SeaORM"]
+            storageS["Runtime Object Storage"]
             menuS["Menu Registry"]
         end
     end
@@ -103,7 +104,7 @@ flowchart TB
     class vinext,devupui,devupapi,rq node
     class init,prebuild,dev,build cli
     class dotYeollin,binary output
-    class axum,jwtS,staticS,openapiS,dbS,menuS runtime
+    class axum,jwtS,staticS,openapiS,dbS,storageS,menuS runtime
 ```
 
 ## Build flow
@@ -133,3 +134,11 @@ into administrator history with `Event::AUDIT`; `audit-log` queries those rows
 in place. Its retention pass deletes only processed, marked rows so the outbox
 remains the single source of truth and pending delivery is never treated as a
 disposable log.
+
+Embedded frontend output remains read-only. Plugins that declare
+`runtime_storage: true` receive a `RuntimeStorage` extension backed by the
+application's `with_storage_dir` root. `YeollinApp::run` creates that directory
+only after its early `YEOLLIN_EXPORT` return, so prebuild remains side-effect
+free. Objects are namespaced and sharded as
+`<root>/<plugin>/objects/<first-two-key-characters>/<opaque-key>`; neither the
+original filename nor a client path participates in resolution.

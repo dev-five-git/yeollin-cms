@@ -193,6 +193,31 @@ would have let `/api/example-memo-plugin/1.ico` reach a handler unauthenticated;
 `crates/auth/src/middleware.rs` lock that behaviour down, along with the
 traversal and prefix cases above.
 
+## Persist runtime media storage
+
+The executable embeds frontend assets, but uploaded files are mutable and cannot
+live inside `include_dir!`. `apps/example-app` configures
+`with_storage_dir(YEOLLIN_STORAGE_DIR)`, defaulting to `./storage`. The `media`
+plugin writes objects below:
+
+```text
+<storage-root>/media/objects/<first-two-ID-characters>/<32-character-ID>
+```
+
+The object name contains no original filename or extension. The database keeps
+the filename, detected MIME, byte count, owner, and the stable
+`media:<32-lowercase-hex>` reference. `/api/media/file?reference=...` is the one
+exact public serving path; neighbouring paths remain protected. Responses use
+the detected MIME, `nosniff`, an immutable cache policy, and an ETag derived from
+the never-reused ID.
+
+In production, set `YEOLLIN_STORAGE_DIR` to a dedicated persistent volume and
+pin its absolute path. The process user needs read/write access. Do not point it
+at `.yeollin/`, which prebuild regenerates, or at the embedded frontend output.
+Back up the storage root together with SQLite: the database is the index and the
+directory holds the bytes, so restoring only one produces missing metadata or
+orphaned objects.
+
 ## Run behind TLS
 
 The binary speaks plain HTTP. Terminate TLS in front of it with a reverse proxy
@@ -216,8 +241,8 @@ the process working directory. Vespertide provisions the schema during plugin
 initialisation.
 
 That file holds your users, your Argon2 password hashes, your active sessions,
-typed plugin settings, the transactional event outbox, and all plugin data.
-Treat it as the whole application state:
+typed plugin settings, the transactional event outbox, and plugin metadata.
+Treat it and any configured runtime storage root as the application state:
 
 - Back it up on a schedule, and test a restore.
 - Copy it with a SQLite-aware method rather than a naive file copy of a live
@@ -265,23 +290,24 @@ in this document.
   third-party plugin code runs with full process privileges. `require_role`
   enforces *user* authorization; it does not isolate the plugin itself. Only
   install plugins you trust as much as the application.
-- **No browser test coverage.** CI runs clippy, `cargo test`, `cargo doc`,
-  oxlint, `tsc --noEmit`, and a frontend build. Four of those tests boot the
-  real binary and drive it over HTTP, but nothing exercises the application
-  through a browser.
+- **No browser test coverage in CI.** CI runs clippy, `cargo test`, `cargo doc`,
+  oxlint, `tsc --noEmit`, and a frontend build. HTTP system tests boot the real
+  binary, but browser QA is still a release-process step rather than an
+  automated CI job.
 
 ## Deployment checklist
 
 1. Build the release binary with `cargo run -p yeollin-cli -- build`.
 2. Set `JWT_SECRET` to at least 32 bytes from a secret store.
 3. Set `PORT`, and a working directory that pins the SQLite file location.
-4. Confirm `YEOLLIN_DEV_PROXY` is **not** set.
-5. Start once with `YEOLLIN_ADMIN_USERNAME` and `YEOLLIN_ADMIN_PASSWORD` to seed
+4. Set `YEOLLIN_STORAGE_DIR` to a persistent volume and verify it is writable.
+5. Confirm `YEOLLIN_DEV_PROXY` is **not** set.
+6. Start once with `YEOLLIN_ADMIN_USERNAME` and `YEOLLIN_ADMIN_PASSWORD` to seed
    the first administrator.
-6. Sign in, verify the account, then unset both bootstrap variables and restart.
-7. Put a TLS-terminating reverse proxy in front. Add rate limiting on
+7. Sign in, verify the account, then unset both bootstrap variables and restart.
+8. Put a TLS-terminating reverse proxy in front. Add rate limiting on
    `/api/auth/login` there too if you run more than one instance, since the
    built-in throttle is per-process.
-8. Schedule and verify backups of the SQLite file.
-9. Review every `route.meta.json` with `"access": "public"` or `"guest"` and
+9. Schedule and verify coordinated backups of SQLite and runtime storage.
+10. Review every `route.meta.json` with `"access": "public"` or `"guest"` and
    confirm each one is deliberate.

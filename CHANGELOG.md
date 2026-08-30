@@ -21,6 +21,9 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Added
 
+- The `media` plugin provides an administrator media library, typed multipart image uploads, paginated metadata, deletion, and a public serving route. JPEG, PNG, GIF, and WebP are verified from their signatures; upload size has a 10 MiB hard ceiling and a typed 1–10 MiB setting.
+- Writable runtime object storage through `YeollinAppBuilder::with_storage_dir` and the `RuntimeStorage` plugin extension. Objects use namespace/shard/opaque-key paths outside the embedded frontend, and required storage is initialized only after metadata export exits.
+- Plugins can declare exact `public_api_routes` and a multipart `request_body_limit` in `yeollin_plugin!`. Public API declarations reject roots, dynamic segments, queries, traversal, and trailing slashes so path-based authentication stays exact.
 - The `audit-log` plugin provides an administrator-only, paginated event history with exact-name filtering and a typed retention setting. It reads audit-marked rows from the transactional event outbox instead of maintaining duplicate storage.
 - Events can opt into audit history with `Event::AUDIT`. The default is `false`; memo create, update, and delete events opt in. Retention removes only processed audit rows so pending Deferred delivery remains recoverable.
 - Typed event hooks: plugin authors implement `Event` for serializable payloads, emit through an `EventTransaction`, and register exact-name Inline or Deferred subscribers in plugin metadata.
