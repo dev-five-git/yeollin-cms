@@ -23,7 +23,7 @@ Yeollin CMS is a Tauri-inspired, plugin-based CMS *framework* rather than a fini
 |------|----------|
 | `crates/` | The Rust workspace crates: `core` (shared types), `auth` (JWT, Argon2, middleware), `plugin` (`PluginMetadata`, `FrontendAssets`), `plugin-macros` (`yeollin_plugin!`, `yeollin_app!`), `app` (`YeollinAppBuilder` runtime), `cli` (`init`, `prebuild`, `dev`, `build`). |
 | `packages/` | The Node workspace. `packages/app` is the vinext frontend template that gets extracted into `.yeollin/app/` at prebuild time. It is a template, not the running app. |
-| `plugins/` | Plugin crates. `auth` owns accounts and sessions; `audit-log` reads explicitly marked outbox events; `media` owns runtime image uploads; `example-plugin` is a minimal library plugin; `example-memo-plugin` demonstrates database CRUD, typed settings, and audited events. |
+| `plugins/` | Plugin crates. `auth` owns accounts and sessions; `audit-log` reads explicitly marked outbox events; `media` owns runtime image uploads; `content` demonstrates compile-time typed draft/publish collections; `example-plugin` is a minimal library plugin; `example-memo-plugin` demonstrates database CRUD, typed settings, and audited events. |
 | `apps/` | Standalone application crates. `apps/example-app` wires the example plugins together with `yeollin_app!` and is the entry point used for local development. |
 
 `.yeollin/` is generated during prebuild and is gitignored. Never edit it by hand.
@@ -99,6 +99,7 @@ CI additionally builds the release binary with
 ## Further reading
 
 - [Architecture overview](docs/architecture.md)
+- [Plugin authoring](docs/plugin-authoring.md)
 - [Contributing guide](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)

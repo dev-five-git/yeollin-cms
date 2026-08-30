@@ -16,10 +16,10 @@ flowchart TB
 
     subgraph CoreCrates["?? Rust Core Crates"]
         direction TB
-        core["yeollin-core<br/>(ContentMeta, MenuItem, MenuConfig)"]
+        core["yeollin-core<br/>(ContentRepository, Events, Settings, Menus)"]
         auth["yeollin-auth<br/>(JWT, Argon2, Middleware)"]
         pluginLib["yeollin-plugin<br/>(PluginMetadata, FrontendAssets)"]
-        macros["yeollin-plugin-macros<br/>(yeollin_plugin!, yeollin_app!)"]
+        macros["yeollin-plugin-macros<br/>(yeollin_plugin!, yeollin_content_collection!, yeollin_app!)"]
         appLib["yeollin-app<br/>(YeollinApp, YeollinAppBuilder)"]
     end
 
@@ -113,7 +113,8 @@ flowchart TB
    `YEOLLIN_EXPORT`, which prints one envelope on stdout and exits.
 2. `yeollin prebuild` ??extracts the `packages/app` template into `.yeollin/app/`,
    copies each plugin's `app/` pages in, generates typed settings forms unless a
-   plugin supplies `app/settings/page.tsx`, and writes `menus.json` / `plugins.json`.
+   plugin supplies `app/settings/page.tsx`, generates typed collection hubs and
+   CRUD editors, and writes `menus.json` / `plugins.json`.
 3. `vinext build` ??static export to `.yeollin/app/dist/client/`, then the CLI
    copies the client output to `.yeollin/app/out/`.
 4. `cargo build --release` ??final binary, embedding static files via `include_dir!`.
@@ -134,6 +135,14 @@ into administrator history with `Event::AUDIT`; `audit-log` queries those rows
 in place. Its retention pass deletes only processed, marked rows so the outbox
 remains the single source of truth and pending delivery is never treated as a
 disposable log.
+
+The same core migration owns `content_entries`. A plugin collection registers a
+concrete Rust field type, generated handlers, and its build-time schema. Runtime
+writes round-trip that concrete type through the shared JSON field while the
+framework owns publication metadata and collection-scoped slug uniqueness.
+Prebuild uses only exported schema/default data to assemble the generic editor;
+the public endpoint is a fixed exact path and filters to `published` in the
+database query.
 
 Embedded frontend output remains read-only. Plugins that declare
 `runtime_storage: true` receive a `RuntimeStorage` extension backed by the

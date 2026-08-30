@@ -106,6 +106,7 @@ collected automatically.
 | `frontend` | no | bool literal | `true` by default. Set `false` for an API-only plugin with no `app/` directory. |
 | `api_base` | no | string literal | Override the API namespace derived from `name`; never include `api`. |
 | `settings` | no | Rust type path | Register a typed settings contract and its generated API and page. |
+| `collections` | no | expression list | Register compile-time typed content collections and their generated CRUD surfaces. |
 | `subscribers` | no | expression list | Register observe-only Inline or Deferred event subscribers. |
 | `public_api_routes` | no | string-literal list | Exact, fixed suffixes below this plugin's API namespace that do not require authentication. |
 | `runtime_storage` | no | bool literal | Require the host to configure a writable `RuntimeStorage` extension. |
@@ -260,6 +261,89 @@ generates `/<plugin>/settings`. To own the presentation, add
 `app/settings/page.tsx`; that exact file replaces the generated page while the
 typed API and persistence stay unchanged. Do not place the override under a
 route group.
+
+## Typed content collections
+
+A collection declares its plugin-specific fields as an ordinary Rust type. The
+framework adds the shared content envelope: ID, title, slug, draft/published
+status, author, created/updated timestamps, and the optional published
+timestamp.
+
+```rust
+use serde::{Deserialize, Serialize};
+use vespera::Schema;
+use yeollin_plugin::ContentFields;
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Schema)]
+#[serde(rename_all = "camelCase")]
+pub struct PageFields {
+    pub excerpt: String,
+    pub body: String,
+    pub hero_image: Option<String>,
+}
+
+impl ContentFields for PageFields {
+    fn validate(&self) -> Result<(), String> {
+        if self.body.trim().is_empty() {
+            return Err("body must not be empty".to_string());
+        }
+        Ok(())
+    }
+}
+
+yeollin_plugin::yeollin_content_collection! {
+    module: pages,
+    name: "pages",
+    label: "Pages",
+    fields: crate::PageFields,
+    order: 30,
+}
+
+yeollin_plugin::yeollin_plugin! {
+    name: "content",
+    frontend: false,
+    collections: [pages::registration()],
+}
+```
+
+Collection names are stable lowercase kebab-case identifiers. The macro emits
+concrete request, response, query, and list types for `PageFields`; there is no
+untyped route payload. `Default` seeds the generated editor, `Schema` describes
+its controls at build time, and `ContentFields::validate` runs before every
+create or field update. Keep validation deterministic and free of I/O.
+
+The example above owns these routes:
+
+| Method | Path | Access | Purpose |
+|--------|------|--------|---------|
+| `GET`, `POST` | `/api/content/pages` | administrator | Paginated list and draft creation. |
+| `GET`, `PUT`, `DELETE` | `/api/content/pages/{id}` | administrator | Read, update, or delete one entry. |
+| `POST` | `/api/content/pages/{id}/publish` | administrator | Publish a draft. |
+| `POST` | `/api/content/pages/{id}/unpublish` | administrator | Return published content to draft. |
+| `GET` | `/api/content/pages/published?slug=about` | public | Fetch one published entry by its exact slug. |
+
+The public route is fixed and whole-path exact. The slug remains a query value,
+so no dynamic route has to be exempted from authentication. Drafts return 404
+there. Management handlers always call `require_role("admin")`; authentication
+alone does not authorize them.
+
+All collections share the framework-owned `content_entries` table. Slugs are
+unique within a collection, while collection-specific fields are serialized
+from and back into their concrete Rust type. Create, update, publish, unpublish,
+and delete emit audit-enabled `content.*` events in the same transaction as the
+write. The original author is retained across later edits.
+
+Prebuild exports each field schema and writes a collection hub plus a reusable
+list/editor page under `/<plugin>/<collection>`. It never fetches during SSG.
+Primitive fields get native form controls; object and array fields get a JSON
+editor. A plugin can therefore set `frontend: false` and still ship the generated
+content UI. Because persistence is shared, registering any collection requires
+the host application to configure a database.
+
+Content may store media references such as
+`media:0123456789abcdef0123456789abcdef`. Validate the canonical reference in
+the field type and store that reference, not `/api/media/file?...`, an original
+filename, or a runtime storage path.
 
 ## Typed events and subscribers
 
