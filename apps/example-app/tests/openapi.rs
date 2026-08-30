@@ -112,6 +112,7 @@ fn every_plugin_route_lives_under_its_declared_namespace() {
             "/api/auth/logout",
             "/api/auth/me",
             "/api/auth/refresh",
+            "/api/auth/users",
             "/api/dashboard/stats",
             "/api/example-memo-plugin",
             "/api/example-memo-plugin/{id}",

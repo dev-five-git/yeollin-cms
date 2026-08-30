@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use vespera::Schema;
 use yeollin_plugin::{
     yeollin_auth::{generate_access_token, verify_password},
-    AuthConfig, CurrentUser, PluginError,
+    Authorize, AuthConfig, CurrentUser, PluginError,
 };
 
 use crate::models::{session, user};
@@ -48,6 +48,21 @@ pub struct UserResponse {
 #[serde(rename_all = "camelCase")]
 pub struct LogoutResponse {
     pub success: bool,
+}
+
+#[derive(Serialize, Schema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSummary {
+    pub username: String,
+    pub role: String,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Schema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListUsersResponse {
+    pub users: Vec<UserSummary>,
+    pub total: u64,
 }
 
 /// Identical for an unknown user and a wrong password, so the endpoint cannot be
@@ -203,4 +218,28 @@ pub async fn me(Extension(current): Extension<CurrentUser>) -> Json<UserResponse
         username: current.sub,
         role: current.role.unwrap_or_else(|| "user".to_string()),
     })
+}
+
+/// List every account. Administrators only.
+#[vespera::route(get, path = "/users", tags = ["auth"])]
+pub async fn list_users(
+    Extension(db): Extension<DatabaseConnection>,
+    Extension(current): Extension<CurrentUser>,
+) -> Result<Json<ListUsersResponse>, PluginError> {
+    // Authentication alone would let any signed-in account read the roster.
+    current.require_role("admin")?;
+
+    let accounts = user::Entity::find().all(&db).await?;
+
+    Ok(Json(ListUsersResponse {
+        total: accounts.len() as u64,
+        users: accounts
+            .into_iter()
+            .map(|account| UserSummary {
+                username: account.username,
+                role: account.role,
+                created_at: account.created_at.to_rfc3339(),
+            })
+            .collect(),
+    }))
 }

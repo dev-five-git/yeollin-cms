@@ -188,6 +188,35 @@ async fn assembled_system_rotates_and_revokes_refresh_tokens() {
 }
 
 #[tokio::test]
+async fn assembled_system_enforces_role_on_admin_routes() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+
+    let anonymous = client.get(server.url("/api/auth/users")).send().await.unwrap();
+    assert_eq!(anonymous.status(), 401, "the roster must not be public");
+
+    let tokens: Value = login(&client, &server, PASSWORD).await.json().await.unwrap();
+    let access = tokens["access_token"].as_str().expect("access token");
+
+    let admin = client
+        .get(server.url("/api/auth/users"))
+        .bearer_auth(access)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admin.status(), 200, "the seeded administrator may read it");
+
+    let roster: Value = admin.json().await.unwrap();
+    assert_eq!(roster["total"], 1);
+    assert_eq!(roster["users"][0]["username"], ADMIN);
+    assert_eq!(roster["users"][0]["role"], "admin");
+    assert!(
+        roster["users"][0].get("passwordHash").is_none(),
+        "a password hash must never leave the server"
+    );
+}
+
+#[tokio::test]
 async fn assembled_system_throttles_repeated_failures() {
     let server = start().await;
     let client = reqwest::Client::new();

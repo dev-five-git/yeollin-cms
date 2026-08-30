@@ -1,17 +1,7 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/core",
-    "crates/auth",
-    "crates/plugin",
-    "crates/plugin-macros",
-    "crates/app",
-    "crates/cli",
-    "plugins/example-plugin",
-    "plugins/example-memo-plugin",
-    "plugins/auth",
-    "apps/example-app",
-]
+# Globbed so that creating a plugin or app does not require editing this list.
+members = ["crates/*", "plugins/*", "apps/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -65,6 +55,7 @@ notify = { version = "8", default-features = false, features = ["macos_kqueue"] 
 notify-debouncer-mini = "0.7"
 dunce = "1"
 tempfile = "3"
+toml_edit = "0.25"
 
 # Auth / JWT
 jsonwebtoken = { version = "11", features = ["rust_crypto"] }

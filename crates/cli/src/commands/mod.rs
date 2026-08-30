@@ -5,6 +5,7 @@ use tokio::process::Command;
 pub mod build;
 pub mod dev;
 pub mod init;
+pub mod plugin;
 pub mod prebuild;
 
 pub(super) fn bun_command() -> Command {
