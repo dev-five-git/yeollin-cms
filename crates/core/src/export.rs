@@ -16,7 +16,23 @@ use crate::route::RouteEntry;
 pub const EXPORT_ENV_VAR: &str = "YEOLLIN_EXPORT";
 
 /// Version of the [`ExportEnvelope`] contract.
-pub const EXPORT_SCHEMA_VERSION: u32 = 1;
+pub const EXPORT_SCHEMA_VERSION: u32 = 2;
+
+/// Build-time information used to expose a plugin's settings screen.
+#[derive(Debug, Clone, Serialize, Deserialize, Schema)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSettingsInfo {
+    /// Exact Vespera-generated JSON schema for the plugin's settings type.
+    pub schema: serde_json::Value,
+    /// Serialized `Default` value for a newly installed plugin.
+    pub default_value: serde_json::Value,
+    /// Typed API endpoint generated for this plugin.
+    pub api_path: String,
+    /// Frontend route where the settings form is assembled.
+    pub page_path: String,
+    /// Whether the plugin supplies `app/settings/page.tsx` instead of the generated form.
+    pub custom_page: bool,
+}
 
 /// Plugin information exposed to the CLI and the plugins API.
 #[derive(Debug, Clone, Serialize, Deserialize, Schema)]
@@ -31,6 +47,8 @@ pub struct PluginInfo {
     pub license: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frontend_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<PluginSettingsInfo>,
 }
 
 /// Everything prebuild needs from a built binary, in one document.

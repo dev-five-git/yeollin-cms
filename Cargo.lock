@@ -5179,11 +5179,16 @@ dependencies = [
 name = "yeollin-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "chrono",
+ "sea-orm",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
+ "tokio",
  "vespera",
+ "vespertide",
 ]
 
 [[package]]

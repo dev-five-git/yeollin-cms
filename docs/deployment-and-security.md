@@ -216,7 +216,7 @@ the process working directory. Vespertide provisions the schema during plugin
 initialisation.
 
 That file holds your users, your Argon2 password hashes, your active sessions,
-and all plugin data. Treat it as the whole application state:
+typed plugin settings, and all plugin data. Treat it as the whole application state:
 
 - Back it up on a schedule, and test a restore.
 - Copy it with a SQLite-aware method rather than a naive file copy of a live

@@ -104,6 +104,8 @@ collected automatically.
 | `description` | no | string literal | Recorded in the exported plugin metadata. |
 | `on_init` | no | expression | An `async fn(DatabaseConnection) -> anyhow::Result<()>` run once at startup. |
 | `frontend` | no | bool literal | `true` by default. Set `false` for an API-only plugin with no `app/` directory. |
+| `api_base` | no | string literal | Override the API namespace derived from `name`; never include `api`. |
+| `settings` | no | Rust type path | Register a typed settings contract and its generated API and page. |
 
 Anything else is a compile error: the macro rejects unknown fields.
 
@@ -147,6 +149,55 @@ async fn initialize(db: DatabaseConnection) -> anyhow::Result<()> {
 
 An `on_init` callback runs only when the application has a database configured.
 If it returns an error, startup fails with the plugin name attached.
+
+## Typed plugin settings
+
+Declare a settings struct before `yeollin_plugin!` and pass its type to the
+`settings` field:
+
+```rust
+use serde::{Deserialize, Serialize};
+use vespera::Schema;
+
+#[derive(Debug, Default, Serialize, Deserialize, Schema)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoSettings {
+    pub compact_mode: bool,
+    pub footer_note: String,
+}
+
+yeollin_plugin::yeollin_plugin! {
+    name: "example-memo-plugin",
+    settings: MemoSettings,
+}
+```
+
+The macro adds administrator-only `GET` and `PUT` handlers at
+`/api/example-memo-plugin/settings`. Values are deserialized through
+`MemoSettings` before they are written, and the framework stores exactly one
+JSON row for the plugin. Existing values survive restarts; `Default` seeds a
+new installation.
+
+Plugin handlers can read the same value without parsing untyped JSON:
+
+```rust
+use axum::Extension;
+use yeollin_plugin::SettingsStore;
+
+async fn render(Extension(settings): Extension<SettingsStore>) -> anyhow::Result<()> {
+    let settings = settings
+        .get::<MemoSettings>("example-memo-plugin")
+        .await?;
+    // use settings.compact_mode
+    Ok(())
+}
+```
+
+Prebuild serializes Vespera's schema and `Default` into `plugins.json` and
+generates `/<plugin>/settings`. To own the presentation, add
+`app/settings/page.tsx`; that exact file replaces the generated page while the
+typed API and persistence stay unchanged. Do not place the override under a
+route group.
 
 ## API routes: how URLs are derived
 

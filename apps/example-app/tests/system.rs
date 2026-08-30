@@ -234,6 +234,91 @@ async fn assembled_system_enforces_role_on_admin_routes() {
 }
 
 #[tokio::test]
+async fn assembled_system_validates_and_persists_plugin_settings() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+
+    let anonymous = client
+        .get(server.url("/api/example-plugin/settings"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), 401, "settings must not be public");
+
+    let token = admin_token(&client, &server).await;
+    let defaults: Value = client
+        .get(server.url("/api/example-plugin/settings"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(defaults["homepageMessage"], "");
+    assert_eq!(defaults["maintenanceMode"], false);
+
+    let updated = serde_json::json!({
+        "homepageMessage": "Configured",
+        "maintenanceMode": true,
+    });
+    let saved = client
+        .put(server.url("/api/example-plugin/settings"))
+        .bearer_auth(&token)
+        .json(&updated)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), 200);
+    assert_eq!(saved.json::<Value>().await.unwrap(), updated);
+
+    let persisted: Value = client
+        .get(server.url("/api/example-plugin/settings"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(persisted, updated);
+
+    let created: Value = client
+        .post(server.url("/api/auth/users"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "username": "settings-reader",
+            "password": "settings-reader-password",
+            "role": "user",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(created["role"], "user");
+
+    let user_tokens: Value = login_as(
+        &client,
+        &server,
+        "settings-reader",
+        "settings-reader-password",
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    let denied = client
+        .get(server.url("/api/example-plugin/settings"))
+        .bearer_auth(user_tokens["access_token"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), 403, "settings require the admin role");
+}
+
+#[tokio::test]
 async fn assembled_system_manages_accounts() {
     let server = start().await;
     let client = reqwest::Client::new();

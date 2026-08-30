@@ -121,7 +121,7 @@ nobody can sign in, and startup continues. Set both, restart, and try again.
 The database is a SQLite file. `apps/example-app` uses
 `sqlite://./db.sqlite?mode=rwc`, so the file is created next to the working
 directory on the first run and the schema is provisioned by vespertide during
-plugin initialisation.
+framework and plugin initialisation.
 
 ## Sign in
 
@@ -144,6 +144,10 @@ The auth endpoints owned by `auth`:
 
 `login`, `refresh`, and `logout` are reachable without an access token; `me` is
 not.
+
+Open **Settings** after signing in. The example plugin demonstrates a custom
+settings screen, while the memo plugin's form is generated from its Rust and
+Vespera settings schema. Both save through administrator-only typed endpoints.
 
 ## Explore the API docs
 

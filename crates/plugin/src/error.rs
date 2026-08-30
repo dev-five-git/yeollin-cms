@@ -115,6 +115,26 @@ impl From<sea_orm::DbErr> for PluginError {
     }
 }
 
+impl From<yeollin_core::SettingsError> for PluginError {
+    fn from(error: yeollin_core::SettingsError) -> Self {
+        match error {
+            yeollin_core::SettingsError::UnknownPlugin(plugin) => {
+                Self::not_found(format!("No settings are registered for `{plugin}`"))
+            }
+            yeollin_core::SettingsError::TypeMismatch(plugin) => {
+                tracing::error!(%plugin, "settings type mismatch");
+                Self::internal()
+            }
+            yeollin_core::SettingsError::Invalid(message) => Self::bad_request(message),
+            yeollin_core::SettingsError::Serialize(error) => {
+                tracing::error!(%error, "could not serialize plugin settings");
+                Self::internal()
+            }
+            yeollin_core::SettingsError::Database(error) => Self::from(error),
+        }
+    }
+}
+
 /// Shorthand for helper functions that fail with a [`PluginError`].
 ///
 /// **Do not use this in a `#[vespera::route]` handler signature.** Vespera reads

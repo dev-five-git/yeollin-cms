@@ -10,6 +10,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 vespera = { workspace = true }
+vespertide = { workspace = true }
+sea-orm = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true }

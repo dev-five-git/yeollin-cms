@@ -45,6 +45,7 @@ struct PluginDef {
     on_init: Option<Expr>,
     frontend: Option<bool>,
     api_base: Option<LitStr>,
+    settings: Option<Path>,
 }
 
 impl Parse for PluginDef {
@@ -55,6 +56,7 @@ impl Parse for PluginDef {
         let mut on_init: Option<Expr> = None;
         let mut frontend: Option<bool> = None;
         let mut api_base: Option<LitStr> = None;
+        let mut settings: Option<Path> = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -80,6 +82,9 @@ impl Parse for PluginDef {
                 "api_base" => {
                     api_base = Some(input.parse()?);
                 }
+                "settings" => {
+                    settings = Some(input.parse()?);
+                }
                 _ => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -103,6 +108,7 @@ impl Parse for PluginDef {
             on_init,
             frontend,
             api_base,
+            settings,
         })
     }
 }
@@ -307,7 +313,81 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
         Err(error) => return TokenStream::from(error.to_compile_error()),
     };
 
+    let settings_tokens = def.settings.as_ref().map(|settings_type| {
+        quote! {
+            pub async fn __yeollin_get_plugin_settings(
+                yeollin_plugin::vespera::axum::Extension(settings):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::SettingsStore>,
+                yeollin_plugin::vespera::axum::Extension(current):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::CurrentUser>,
+            ) -> Result<yeollin_plugin::vespera::axum::Json<#settings_type>, yeollin_plugin::PluginError> {
+                yeollin_plugin::Authorize::require_role(&current, "admin")?;
+                Ok(yeollin_plugin::vespera::axum::Json(
+                    settings.get::<#settings_type>(#name_lit).await?
+                ))
+            }
+
+            pub async fn __yeollin_put_plugin_settings(
+                yeollin_plugin::vespera::axum::Extension(settings):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::SettingsStore>,
+                yeollin_plugin::vespera::axum::Extension(current):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::CurrentUser>,
+                yeollin_plugin::vespera::axum::Json(value):
+                    yeollin_plugin::vespera::axum::Json<#settings_type>,
+            ) -> Result<yeollin_plugin::vespera::axum::Json<#settings_type>, yeollin_plugin::PluginError> {
+                yeollin_plugin::Authorize::require_role(&current, "admin")?;
+                Ok(yeollin_plugin::vespera::axum::Json(
+                    settings.set::<#settings_type>(#name_lit, value).await?
+                ))
+            }
+        }
+    });
+
+    let metadata_router = if def.settings.is_some() {
+        let api_path = LitStr::new(&format!("{api_prefix}/settings"), name_lit.span());
+        quote! {
+            yeollin_plugin::vespera::axum::Router::new().route(
+                #api_path,
+                yeollin_plugin::vespera::axum::routing::get(__yeollin_get_plugin_settings)
+                    .put(__yeollin_put_plugin_settings),
+            )
+        }
+    } else {
+        quote! { yeollin_plugin::vespera::axum::Router::new() }
+    };
+
+    let settings_setter = def.settings.as_ref().map(|settings_type| {
+        let api_path = LitStr::new(&format!("{api_prefix}/settings"), name_lit.span());
+        let page_path = LitStr::new(
+            &format!("/{}/settings", to_kebab_case(&name_str)),
+            name_lit.span(),
+        );
+        let custom_page = std::env::var("CARGO_MANIFEST_DIR")
+            .map(|dir| {
+                std::path::Path::new(&dir)
+                    .join("app")
+                    .join("settings")
+                    .join("page.tsx")
+                    .is_file()
+            })
+            .unwrap_or(false);
+
+        quote! {
+            .settings(yeollin_plugin::SettingsRegistration::new::<#settings_type>(
+                #name_lit,
+                yeollin_plugin::serde_json::to_value(
+                    yeollin_plugin::vespera::schema!(#settings_type)
+                ).expect("Vespera settings schema must serialize"),
+                #api_path,
+                #page_path,
+                #custom_page,
+            ))
+        }
+    });
+
     let expanded = quote! {
+        #settings_tokens
+
         // Auto-generate export_app with PascalCase name derived from plugin name.
         // The prefix mounts every route under the plugin's API namespace, so a
         // handler's URL comes from the declaration rather than its file location.
@@ -323,9 +403,10 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
                 #author_setter
                 #description_setter
                 .license(env!("CARGO_PKG_LICENSE"))
-                .router(yeollin_plugin::vespera::axum::Router::new())
+                .router(#metadata_router)
                 #on_init_setter
                 #frontend_setters
+                #settings_setter
                 .build()
         }
     };
@@ -506,10 +587,7 @@ mod api_base_tests {
 
     #[test]
     fn defaults_to_the_plugin_name() {
-        assert_eq!(
-            prefix_of(r#"name: "media-library""#),
-            "/api/media-library"
-        );
+        assert_eq!(prefix_of(r#"name: "media-library""#), "/api/media-library");
     }
 
     #[test]
@@ -560,6 +638,16 @@ mod api_base_tests {
     #[test]
     fn an_empty_base_is_rejected() {
         assert!(error_of(r#"name: "x", api_base: "/""#).contains("must not be empty"));
+    }
+
+    #[test]
+    fn accepts_a_settings_type() {
+        let def: PluginDef = syn::parse_str(r#"name: "x", settings: crate::Settings"#).unwrap();
+
+        assert_eq!(
+            def.settings.unwrap().segments.last().unwrap().ident,
+            "Settings"
+        );
     }
 }
 

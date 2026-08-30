@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/migration.schema.json",
+  "actions": [
+    {
+      "columns": [
+        {
+          "name": "plugin_name",
+          "nullable": false,
+          "primary_key": true,
+          "type": "text"
+        },
+        {
+          "name": "value",
+          "nullable": false,
+          "type": "json"
+        },
+        {
+          "default": "NOW()",
+          "name": "updated_at",
+          "nullable": false,
+          "type": "timestamptz"
+        }
+      ],
+      "constraints": [],
+      "table": "settings",
+      "type": "create_table"
+    }
+  ],
+  "comment": "create settings table",
+  "created_at": "2026-08-30T17:13:37Z",
+  "id": "442084e1-a76c-497b-92b1-c9fdc02aaa49",
+  "version": 1
+}

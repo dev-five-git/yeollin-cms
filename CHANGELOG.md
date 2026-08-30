@@ -21,6 +21,8 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Added
 
+- Typed plugin settings: `settings: MySettings` registers a `Serialize + Deserialize + Schema + Default` contract, persists one validated JSON row per plugin, generates administrator-only GET/PUT endpoints, and exposes a `SettingsStore` Axum extension for typed reads.
+- Settings pages are generated from the Vespera schema during prebuild. A plugin can replace its generated form with `app/settings/page.tsx`, and the shell settings page now links only to real plugin configuration surfaces.
 - Account management in the `auth` plugin: `POST /api/auth/users` creates, `PATCH /api/auth/users/{id}` changes a role, `DELETE /api/auth/users/{id}` removes an account and its sessions, `POST /api/auth/password` changes your own, and `POST /api/auth/users/{id}/password` lets an administrator reset another. Every one is administrator-only except changing your own password, which requires the current one.
 - A **Users** page at `/auth`, the plugin's first frontend. Roles are `admin` and `user`; an unrecognised role is refused rather than stored, since role matching is exact and a typo would grant nothing.
 - Lockout guards: the only administrator cannot be demoted or deleted, and no account can delete the one it is signed in as. Recovering from either would mean editing the database by hand.
