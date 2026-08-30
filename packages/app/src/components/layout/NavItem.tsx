@@ -26,7 +26,7 @@ export function NavItem({ item }: NavItemProps) {
   const isChildActive = item.children?.some((child) => pathname === child.path)
 
   return (
-    <Box>
+    <Box flexShrink={0}>
       <Link href={item.path} style={{ textDecoration: 'none' }}>
         <Flex
           _hover={{ bg: isActive ? '$primary' : '$backgroundSecondary' }}
@@ -37,13 +37,14 @@ export function NavItem({ item }: NavItemProps) {
           gap={3}
           px={3}
           py={2}
+          whiteSpace="nowrap"
         >
           <Text fontSize="14px">{item.label}</Text>
         </Flex>
       </Link>
 
       {hasChildren && (isActive || isChildActive) && (
-        <Flex flexDirection="column" gap={1} ml={4} mt={1}>
+        <Flex flexDirection="column" gap={1} ml={[0, null, 4]} mt={1}>
           {item.children!.map((child) => (
             <Link
               key={child.id}
@@ -62,6 +63,7 @@ export function NavItem({ item }: NavItemProps) {
                 color={pathname === child.path ? '$primary' : '$textSecondary'}
                 px={3}
                 py={2}
+                whiteSpace="nowrap"
               >
                 <Text fontSize="13px">{child.label}</Text>
               </Flex>

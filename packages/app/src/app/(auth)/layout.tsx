@@ -10,9 +10,9 @@ export default function AuthLayout({
 }) {
   // TODO: Add authentication check here
   return (
-    <Flex h="100vh">
+    <Flex flexDirection={['column', null, 'row']} h="100vh">
       <Sidebar />
-      <Flex flex={1} flexDirection="column" overflow="hidden">
+      <Flex flex={1} flexDirection="column" minH={0} minW={0} overflow="hidden">
         <Header />
         <Box bg="$backgroundSecondary" flex={1} overflow="auto">
           {children}
