@@ -73,6 +73,7 @@ struct MemoCreated {
 
 impl Event for MemoCreated {
     const NAME: &'static str = "memo.created";
+    const AUDIT: bool = true;
 }
 
 #[derive(Serialize)]
@@ -83,6 +84,7 @@ struct MemoUpdated {
 
 impl Event for MemoUpdated {
     const NAME: &'static str = "memo.updated";
+    const AUDIT: bool = true;
 }
 
 #[derive(Serialize)]
@@ -93,6 +95,7 @@ struct MemoDeleted {
 
 impl Event for MemoDeleted {
     const NAME: &'static str = "memo.deleted";
+    const AUDIT: bool = true;
 }
 
 async fn find_memo<C>(db: &C, id: i32) -> PluginResult<memo::Model>

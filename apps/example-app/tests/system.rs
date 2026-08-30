@@ -366,6 +366,101 @@ async fn assembled_system_commits_memo_events_to_the_outbox() {
 }
 
 #[tokio::test]
+async fn assembled_system_exposes_only_audited_events_to_admins() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+
+    let anonymous = client
+        .get(server.url("/api/audit-log"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), 401, "audit history must not be public");
+
+    let token = admin_token(&client, &server).await;
+    let created: Value = client
+        .post(server.url("/api/example-memo-plugin"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Audited memo",
+            "content": "Only explicitly audited events belong in this view",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let listed: Value = client
+        .get(server.url("/api/audit-log?eventName=memo.created"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(listed["total"], 1);
+    assert_eq!(listed["retentionDays"], 90);
+    assert_eq!(listed["events"][0]["name"], "memo.created");
+    assert_eq!(listed["events"][0]["payload"]["memo"]["id"], created["id"]);
+
+    let exact_filter: Value = client
+        .get(server.url("/api/audit-log?eventName=memo"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(exact_filter["total"], 0, "event filters must match exactly");
+
+    let invalid_settings = client
+        .put(server.url("/api/audit-log/settings"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "retentionDays": 0 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid_settings.status(), 422);
+
+    let created_user: Value = client
+        .post(server.url("/api/auth/users"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "username": "audit-reader",
+            "password": "audit-reader-password",
+            "role": "user",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(created_user["role"], "user");
+
+    let user_tokens: Value = login_as(&client, &server, "audit-reader", "audit-reader-password")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let denied = client
+        .get(server.url("/api/audit-log"))
+        .bearer_auth(user_tokens["access_token"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        denied.status(),
+        403,
+        "audit payloads require the admin role"
+    );
+}
+
+#[tokio::test]
 async fn assembled_system_manages_accounts() {
     let server = start().await;
     let client = reqwest::Client::new();

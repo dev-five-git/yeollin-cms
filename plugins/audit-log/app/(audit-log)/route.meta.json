@@ -1,0 +1,6 @@
+{
+  "label": "Audit log",
+  "order": 20,
+  "access": "authenticated",
+  "menu": true
+}

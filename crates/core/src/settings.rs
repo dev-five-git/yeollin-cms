@@ -179,6 +179,23 @@ impl SettingsStore {
             .map_or_else(|| registration.default_value.clone(), |row| row.value))
     }
 
+    /// Read a plugin's validated persisted type when only a database handle is available.
+    ///
+    /// Deferred subscribers use this after startup has seeded and validated the
+    /// registered settings row. A missing row falls back to `Default`.
+    pub async fn read_persisted<T>(
+        db: &DatabaseConnection,
+        plugin_name: &str,
+    ) -> Result<T, SettingsError>
+    where
+        T: DeserializeOwned + Default,
+    {
+        let Some(row) = settings::Entity::find_by_id(plugin_name).one(db).await? else {
+            return Ok(T::default());
+        };
+        serde_json::from_value(row.value).map_err(|error| SettingsError::Invalid(error.to_string()))
+    }
+
     pub async fn set_json(&self, plugin_name: &str, value: Value) -> Result<Value, SettingsError> {
         let registration = self.registration(plugin_name)?;
         let value = (registration.normalize)(value)?;
@@ -282,5 +299,21 @@ mod tests {
             store.get::<String>("example").await,
             Err(SettingsError::TypeMismatch(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn reads_a_persisted_type_without_the_registration_map() {
+        let store = store().await;
+        let expected = ExampleSettings {
+            enabled: true,
+            label: "Deferred".to_string(),
+        };
+        store.set("example", expected.clone()).await.unwrap();
+
+        let actual = SettingsStore::read_persisted::<ExampleSettings>(&store.db, "example")
+            .await
+            .unwrap();
+
+        assert_eq!(actual, expected);
     }
 }

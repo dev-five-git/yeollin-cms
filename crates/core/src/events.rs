@@ -4,7 +4,7 @@ use std::{collections::HashSet, future::Future, pin::Pin, sync::Arc, time::Durat
 
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -26,6 +26,8 @@ const MAX_ERROR_LENGTH: usize = 1_024;
 /// succeeds inside an [`EventTransaction`].
 pub trait Event: Serialize + Send + Sync {
     const NAME: &'static str;
+    /// Whether the event belongs in administrator-facing audit history.
+    const AUDIT: bool = false;
 }
 
 /// Persisted representation consumed by subscribers.
@@ -35,6 +37,7 @@ pub struct EventEnvelope {
     pub id: i64,
     pub name: String,
     pub payload: Value,
+    pub audit: bool,
     pub created_at: chrono::DateTime<chrono::FixedOffset>,
 }
 
@@ -44,6 +47,7 @@ impl From<events::Model> for EventEnvelope {
             id: event.id,
             name: event.name,
             payload: event.payload,
+            audit: event.audit,
             created_at: event.created_at,
         }
     }
@@ -254,6 +258,7 @@ impl EventBus {
         let stored = events::ActiveModel {
             name: Set(E::NAME.to_string()),
             payload: Set(serde_json::to_value(event)?),
+            audit: Set(E::AUDIT),
             created_at: Set(now.into()),
             processed_at: Set(None),
             delivery_attempts: Set(0),
@@ -349,6 +354,38 @@ impl EventBus {
         Ok(processed)
     }
 
+    /// Read only events whose type opted into administrator-facing audit history.
+    pub async fn audited_events(
+        &self,
+        offset: u64,
+        limit: u64,
+        event_name: Option<&str>,
+    ) -> Result<(Vec<EventEnvelope>, u64), EventError> {
+        let mut query = events::Entity::find().filter(events::Column::Audit.eq(true));
+        if let Some(event_name) = event_name.filter(|name| !name.is_empty()) {
+            query = query.filter(events::Column::Name.eq(event_name));
+        }
+        let total = query.clone().count(&self.inner.db).await?;
+        let events = query
+            .order_by_desc(events::Column::Id)
+            .offset(offset)
+            .limit(limit)
+            .all(&self.inner.db)
+            .await?
+            .into_iter()
+            .map(EventEnvelope::from)
+            .collect();
+        Ok((events, total))
+    }
+
+    /// Apply an audit retention cutoff without touching pending or non-audit rows.
+    pub async fn purge_audited_before(
+        &self,
+        cutoff: chrono::DateTime<chrono::FixedOffset>,
+    ) -> Result<u64, EventError> {
+        purge_audited_events_before(&self.inner.db, cutoff).await
+    }
+
     /// Start notify-driven delivery with polling as the correctness fallback.
     pub fn start_drainer(&self) -> JoinHandle<()> {
         let bus = self.clone();
@@ -371,6 +408,20 @@ impl EventBus {
     fn wake(&self) {
         self.inner.notify.notify_one();
     }
+}
+
+/// Delete processed audit history older than `cutoff` while retaining delivery state.
+pub async fn purge_audited_events_before(
+    db: &DatabaseConnection,
+    cutoff: chrono::DateTime<chrono::FixedOffset>,
+) -> Result<u64, EventError> {
+    Ok(events::Entity::delete_many()
+        .filter(events::Column::Audit.eq(true))
+        .filter(events::Column::ProcessedAt.is_not_null())
+        .filter(events::Column::CreatedAt.lt(cutoff))
+        .exec(db)
+        .await?
+        .rows_affected)
 }
 
 fn envelope_attempts(active: &events::ActiveModel) -> i32 {
@@ -461,6 +512,14 @@ mod tests {
         const NAME: &'static str = "test.happened";
     }
 
+    #[derive(Serialize)]
+    struct AuditedTestEvent;
+
+    impl Event for AuditedTestEvent {
+        const NAME: &'static str = "test.audited";
+        const AUDIT: bool = true;
+    }
+
     async fn database() -> DatabaseConnection {
         let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
         migrate_core(&db).await.unwrap();
@@ -482,6 +541,37 @@ mod tests {
         let stored = events::Entity::find().one(&db).await.unwrap().unwrap();
         assert_eq!(stored.name, TestEvent::NAME);
         assert_eq!(stored.payload, serde_json::json!({ "value": "typed" }));
+        assert!(!stored.audit);
+    }
+
+    #[tokio::test]
+    async fn audit_queries_and_retention_only_touch_marked_events() {
+        let db = database().await;
+        let bus = EventBus::new(db.clone(), []).unwrap();
+        let mut transaction = bus.begin().await.unwrap();
+        transaction
+            .emit(&TestEvent { value: "noise" })
+            .await
+            .unwrap();
+        transaction.emit(&AuditedTestEvent).await.unwrap();
+        transaction.commit().await.unwrap();
+
+        let (audited, total) = bus.audited_events(0, 20, None).await.unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(audited[0].name, AuditedTestEvent::NAME);
+        assert!(audited[0].audit);
+
+        let cutoff = (chrono::Utc::now() + chrono::Duration::minutes(1)).into();
+        assert_eq!(
+            bus.purge_audited_before(cutoff).await.unwrap(),
+            0,
+            "retention must not discard an undelivered outbox row"
+        );
+        assert_eq!(bus.drain_once().await.unwrap(), 2);
+        assert_eq!(bus.purge_audited_before(cutoff).await.unwrap(), 1);
+        let remaining = events::Entity::find().all(&db).await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].name, TestEvent::NAME);
     }
 
     #[tokio::test]

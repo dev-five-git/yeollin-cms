@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
     // Create app builder using yeollin_app! macro
     // This macro handles both register_plugin() and vespera merge in one call
     let app = yeollin::yeollin_app! {
-        plugins: [auth, example_plugin, example_memo_plugin],
+        plugins: [audit_log, auth, example_memo_plugin, example_plugin],
         openapi: "openapi.json",
         title: "Example CMS API",
         version: "1.0.0",

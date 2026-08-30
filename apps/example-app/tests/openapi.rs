@@ -108,6 +108,7 @@ fn every_plugin_route_lives_under_its_declared_namespace() {
     assert_eq!(
         actual,
         vec![
+            "/api/audit-log",
             "/api/auth/login",
             "/api/auth/logout",
             "/api/auth/me",
