@@ -628,6 +628,255 @@ async fn assembled_system_uploads_serves_and_deletes_runtime_media() {
 }
 
 #[tokio::test]
+async fn assembled_system_manages_typed_content_publication() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+
+    let protected = client
+        .get(server.url("/api/content/pages"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(protected.status(), 401, "collection management is protected");
+
+    let absent_public = client
+        .get(server.url("/api/content/pages/published?slug=first-page"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        absent_public.status(),
+        404,
+        "the fixed published endpoint is public even before content exists"
+    );
+    let widened = client
+        .get(server.url("/api/content/pages/published/extra?slug=first-page"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        widened.status(),
+        401,
+        "the public content path must match exactly"
+    );
+
+    let token = admin_token(&client, &server).await;
+    let invalid = client
+        .post(server.url("/api/content/pages"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Invalid page",
+            "slug": "invalid-page",
+            "fields": {
+                "excerpt": "Bad media reference",
+                "body": "This should be rejected.",
+                "heroImage": "../../secrets",
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), 400, "typed field validation must run");
+
+    let created = client
+        .post(server.url("/api/content/pages"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "First page",
+            "slug": "First_page",
+            "fields": {
+                "excerpt": "A typed first page",
+                "body": "Draft body",
+                "heroImage": null,
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), 200);
+    let first: Value = created.json().await.unwrap();
+    let first_id = first["id"].as_str().expect("content id");
+    assert_eq!(first_id.len(), 32);
+    assert_eq!(first["slug"], "first-page");
+    assert_eq!(first["status"], "draft");
+    assert_eq!(first["author"], ADMIN);
+    assert!(first["createdAt"].as_str().is_some());
+    assert!(first["updatedAt"].as_str().is_some());
+    assert!(first["publishedAt"].is_null());
+
+    let hidden_draft = client
+        .get(server.url("/api/content/pages/published?slug=first-page"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(hidden_draft.status(), 404, "drafts must never be public");
+
+    let duplicate = client
+        .post(server.url("/api/content/pages"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Duplicate",
+            "slug": "first-page",
+            "fields": {
+                "excerpt": "Duplicate",
+                "body": "Duplicate body",
+                "heroImage": null,
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), 409, "slugs are unique per collection");
+
+    let second = client
+        .post(server.url("/api/content/pages"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Second page",
+            "slug": "second-page",
+            "fields": {
+                "excerpt": "Second",
+                "body": "Second body",
+                "heroImage": null,
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 200);
+
+    let second_page: Value = client
+        .get(server.url("/api/content/pages?page=2&pageSize=1"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(second_page["total"], 2);
+    assert_eq!(second_page["page"], 2);
+    assert_eq!(second_page["pageSize"], 1);
+    assert_eq!(second_page["entries"].as_array().unwrap().len(), 1);
+
+    let published = client
+        .post(server.url(&format!("/api/content/pages/{first_id}/publish")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(published.status(), 200);
+    let published: Value = published.json().await.unwrap();
+    assert_eq!(published["status"], "published");
+    assert!(published["publishedAt"].as_str().is_some());
+
+    let public: Value = client
+        .get(server.url("/api/content/pages/published?slug=first-page"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(public["id"], first_id);
+    assert_eq!(public["fields"]["body"], "Draft body");
+
+    let updated = client
+        .put(server.url(&format!("/api/content/pages/{first_id}")))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Renamed page",
+            "slug": "renamed-page",
+            "fields": {
+                "excerpt": "Updated",
+                "body": "Published body",
+                "heroImage": "media:0123456789abcdef0123456789abcdef",
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), 200);
+    let updated: Value = updated.json().await.unwrap();
+    assert_eq!(updated["status"], "published");
+    assert_eq!(updated["fields"]["heroImage"], "media:0123456789abcdef0123456789abcdef");
+
+    let unpublished = client
+        .post(server.url(&format!("/api/content/pages/{first_id}/unpublish")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unpublished.status(), 200);
+    let unpublished: Value = unpublished.json().await.unwrap();
+    assert_eq!(unpublished["status"], "draft");
+    assert!(unpublished["publishedAt"].is_null());
+    let hidden_again = client
+        .get(server.url("/api/content/pages/published?slug=renamed-page"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(hidden_again.status(), 404);
+
+    let account = client
+        .post(server.url("/api/auth/users"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "username": "content-reader",
+            "password": "content-reader-password",
+            "role": "user",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(account.status(), 200);
+    let user_tokens: Value = login_as(
+        &client,
+        &server,
+        "content-reader",
+        "content-reader-password",
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    let refused = client
+        .get(server.url("/api/content/pages"))
+        .bearer_auth(user_tokens["access_token"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 403, "content management requires admin");
+
+    let audit: Value = client
+        .get(server.url("/api/audit-log?eventName=content.created"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(audit["total"], 2);
+    assert_eq!(audit["events"][0]["payload"]["content"]["collection"], "pages");
+
+    let deleted = client
+        .delete(server.url(&format!("/api/content/pages/{first_id}")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), 200);
+    let gone = client
+        .get(server.url(&format!("/api/content/pages/{first_id}")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(gone.status(), 404);
+}
+
+#[tokio::test]
 async fn assembled_system_manages_accounts() {
     let server = start().await;
     let client = reqwest::Client::new();

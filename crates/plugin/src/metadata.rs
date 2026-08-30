@@ -5,7 +5,30 @@ use axum::Router;
 use sea_orm::DatabaseConnection;
 use std::future::Future;
 use std::pin::Pin;
-use yeollin_core::{SettingsRegistration, SubscriberRegistration};
+use yeollin_core::{ContentCollectionRegistration, SettingsRegistration, SubscriberRegistration};
+
+/// A typed content registration paired with the concrete generated handlers.
+pub struct ContentCollection {
+    registration: ContentCollectionRegistration,
+    router: Router,
+}
+
+impl ContentCollection {
+    pub fn new(registration: ContentCollectionRegistration, router: Router) -> Self {
+        Self {
+            registration,
+            router,
+        }
+    }
+
+    /// Bind both metadata and runtime routes to their plugin API namespace.
+    #[must_use]
+    pub fn for_plugin(mut self, plugin_name: &'static str, api_prefix: &'static str) -> Self {
+        self.registration = self.registration.for_plugin(plugin_name, api_prefix);
+        self.router = Router::new().nest(api_prefix, self.router);
+        self
+    }
+}
 
 /// Type alias for plugin initialization function
 /// Called when plugin is loaded with database connection available
@@ -37,6 +60,8 @@ pub struct PluginMetadata {
     pub on_init: Option<PluginInitFn>,
     /// Optional typed settings contract.
     pub settings: Option<SettingsRegistration>,
+    /// Compile-time typed content collections owned by this plugin.
+    pub content_collections: Vec<ContentCollectionRegistration>,
     /// Observe-only event subscribers owned by this plugin.
     pub subscribers: Vec<SubscriberRegistration>,
     /// Exact API paths that are reachable without authentication.
@@ -61,6 +86,7 @@ impl PluginMetadata {
             frontend_path: None,
             on_init: None,
             settings: None,
+            content_collections: vec![],
             subscribers: vec![],
             public_api_routes: vec![],
             requires_runtime_storage: false,
@@ -81,6 +107,7 @@ pub struct PluginMetadataBuilder {
     frontend_path: Option<&'static str>,
     on_init: Option<PluginInitFn>,
     settings: Option<SettingsRegistration>,
+    content_collections: Vec<ContentCollectionRegistration>,
     subscribers: Vec<SubscriberRegistration>,
     public_api_routes: Vec<&'static str>,
     requires_runtime_storage: bool,
@@ -151,6 +178,13 @@ impl PluginMetadataBuilder {
         self
     }
 
+    /// Register one compile-time typed content collection.
+    pub fn content_collection(mut self, collection: ContentCollection) -> Self {
+        self.router = self.router.merge(collection.router);
+        self.content_collections.push(collection.registration);
+        self
+    }
+
     /// Add an Inline or Deferred event subscriber.
     pub fn subscriber(mut self, subscriber: SubscriberRegistration) -> Self {
         self.subscribers.push(subscriber);
@@ -190,6 +224,7 @@ impl PluginMetadataBuilder {
             frontend_path: self.frontend_path,
             on_init: self.on_init,
             settings: self.settings,
+            content_collections: self.content_collections,
             subscribers: self.subscribers,
             public_api_routes: self.public_api_routes,
             requires_runtime_storage: self.requires_runtime_storage,

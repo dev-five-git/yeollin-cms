@@ -11,7 +11,7 @@ use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input,
     punctuated::Punctuated,
-    Expr, Ident, LitBool, LitStr, Path, Token,
+    Expr, Ident, LitBool, LitInt, LitStr, Path, Token, Type,
 };
 
 /// Convert a kebab-case or snake_case string to PascalCase
@@ -34,6 +34,407 @@ fn ident_to_pascal_case(ident: &Ident) -> Ident {
 }
 
 // ============================================================
+// yeollin_content_collection! macro
+// ============================================================
+
+struct ContentCollectionDef {
+    module: Ident,
+    name: LitStr,
+    label: LitStr,
+    fields: Type,
+    order: LitInt,
+}
+
+impl Parse for ContentCollectionDef {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut module = None;
+        let mut name = None;
+        let mut label = None;
+        let mut fields = None;
+        let mut order = None;
+
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![:]>()?;
+            match key.to_string().as_str() {
+                "module" => module = Some(input.parse()?),
+                "name" => name = Some(input.parse()?),
+                "label" => label = Some(input.parse()?),
+                "fields" => fields = Some(input.parse()?),
+                "order" => order = Some(input.parse()?),
+                _ => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("unknown content collection field: {key}"),
+                    ));
+                }
+            }
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        Ok(Self {
+            module: module.ok_or_else(|| input.error("missing required field: module"))?,
+            name: name.ok_or_else(|| input.error("missing required field: name"))?,
+            label: label.ok_or_else(|| input.error("missing required field: label"))?,
+            fields: fields.ok_or_else(|| input.error("missing required field: fields"))?,
+            order: order.ok_or_else(|| input.error("missing required field: order"))?,
+        })
+    }
+}
+
+fn validate_collection_name(name: &LitStr) -> syn::Result<()> {
+    let value = name.value();
+    let valid = !value.is_empty()
+        && value.len() <= 64
+        && !value.starts_with('-')
+        && !value.ends_with('-')
+        && !value.contains("--")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+    if valid {
+        Ok(())
+    } else {
+        Err(syn::Error::new(
+            name.span(),
+            "content collection names must be 1-64 lowercase kebab-case characters",
+        ))
+    }
+}
+
+/// Declare one compile-time typed content collection.
+///
+/// The generated module owns concrete request and response types plus the full
+/// draft/publish CRUD surface, so Vespera can describe every field in OpenAPI.
+#[proc_macro]
+pub fn yeollin_content_collection(input: TokenStream) -> TokenStream {
+    let def = parse_macro_input!(input as ContentCollectionDef);
+    if let Err(error) = validate_collection_name(&def.name) {
+        return TokenStream::from(error.to_compile_error());
+    }
+    if def.label.value().trim().is_empty() {
+        return TokenStream::from(
+            syn::Error::new(
+                def.label.span(),
+                "content collection label must not be empty",
+            )
+            .to_compile_error(),
+        );
+    }
+    let order = match def.order.base10_parse::<i32>() {
+        Ok(order) => order,
+        Err(error) => {
+            return TokenStream::from(syn::Error::new(def.order.span(), error).to_compile_error())
+        }
+    };
+
+    let module = def.module;
+    let name = def.name;
+    let label = def.label;
+    let fields = def.fields;
+    let type_prefix = to_pascal_case(&name.value());
+    let response = format_ident!("{type_prefix}ContentResponse");
+    let list_response = format_ident!("List{type_prefix}ContentResponse");
+    let list_query = format_ident!("List{type_prefix}ContentQuery");
+    let published_query = format_ident!("Published{type_prefix}ContentQuery");
+    let create_request = format_ident!("Create{type_prefix}ContentRequest");
+    let update_request = format_ident!("Update{type_prefix}ContentRequest");
+    let delete_response = format_ident!("Delete{type_prefix}ContentResponse");
+    let collection_path = LitStr::new(&format!("/{}", name.value()), name.span());
+    let item_path = LitStr::new(&format!("/{}/{{id}}", name.value()), name.span());
+    let publish_path = LitStr::new(&format!("/{}/{{id}}/publish", name.value()), name.span());
+    let unpublish_path = LitStr::new(&format!("/{}/{{id}}/unpublish", name.value()), name.span());
+    let published_path = LitStr::new(&format!("/{}/published", name.value()), name.span());
+
+    TokenStream::from(quote! {
+        pub mod #module {
+            #[derive(Clone, Debug, yeollin_plugin::serde::Serialize, yeollin_plugin::vespera::Schema)]
+            #[serde(rename_all = "camelCase")]
+            pub struct #response {
+                pub id: String,
+                pub collection: String,
+                pub title: String,
+                pub slug: String,
+                pub status: yeollin_plugin::ContentStatus,
+                pub author: String,
+                pub fields: #fields,
+                pub created_at: String,
+                pub updated_at: String,
+                pub published_at: Option<String>,
+            }
+
+            impl From<yeollin_plugin::ContentRecord<#fields>> for #response {
+                fn from(record: yeollin_plugin::ContentRecord<#fields>) -> Self {
+                    Self {
+                        id: record.id,
+                        collection: record.collection,
+                        title: record.title,
+                        slug: record.slug,
+                        status: record.status,
+                        author: record.author,
+                        fields: record.fields,
+                        created_at: record.created_at,
+                        updated_at: record.updated_at,
+                        published_at: record.published_at,
+                    }
+                }
+            }
+
+            #[derive(Debug, yeollin_plugin::serde::Serialize, yeollin_plugin::vespera::Schema)]
+            #[serde(rename_all = "camelCase")]
+            pub struct #list_response {
+                pub entries: Vec<#response>,
+                pub total: u64,
+                pub page: u64,
+                pub page_size: u64,
+            }
+
+            impl From<yeollin_plugin::ContentPage<#fields>> for #list_response {
+                fn from(page: yeollin_plugin::ContentPage<#fields>) -> Self {
+                    Self {
+                        entries: page.entries.into_iter().map(#response::from).collect(),
+                        total: page.total,
+                        page: page.page,
+                        page_size: page.page_size,
+                    }
+                }
+            }
+
+            #[derive(Default, Debug, yeollin_plugin::serde::Deserialize, yeollin_plugin::vespera::Schema)]
+            #[serde(rename_all = "camelCase")]
+            pub struct #list_query {
+                pub page: Option<u64>,
+                pub page_size: Option<u64>,
+                pub status: Option<yeollin_plugin::ContentStatus>,
+            }
+
+            #[derive(Debug, yeollin_plugin::serde::Deserialize, yeollin_plugin::vespera::Schema)]
+            pub struct #published_query {
+                pub slug: String,
+            }
+
+            #[derive(Debug, yeollin_plugin::serde::Deserialize, yeollin_plugin::vespera::Schema)]
+            pub struct #create_request {
+                pub title: String,
+                pub slug: String,
+                pub fields: #fields,
+            }
+
+            #[derive(Debug, yeollin_plugin::serde::Deserialize, yeollin_plugin::vespera::Schema)]
+            pub struct #update_request {
+                pub title: Option<String>,
+                pub slug: Option<String>,
+                pub fields: Option<#fields>,
+            }
+
+            #[derive(Debug, yeollin_plugin::serde::Serialize, yeollin_plugin::vespera::Schema)]
+            #[serde(rename_all = "camelCase")]
+            pub struct #delete_response {
+                pub success: bool,
+                pub deleted_id: String,
+            }
+
+            pub fn registration() -> yeollin_plugin::ContentCollection {
+                let registration = yeollin_plugin::ContentCollectionRegistration::new::<#fields>(
+                        #name,
+                        #label,
+                        #order,
+                        yeollin_plugin::serde_json::to_value(
+                            yeollin_plugin::vespera::schema!(#fields)
+                        ).expect("Vespera content schema must serialize"),
+                    );
+                let router = yeollin_plugin::vespera::axum::Router::new()
+                    .route(
+                        #collection_path,
+                        yeollin_plugin::vespera::axum::routing::get(list_content)
+                            .post(create_content),
+                    )
+                    .route(
+                        #published_path,
+                        yeollin_plugin::vespera::axum::routing::get(published_content),
+                    )
+                    .route(
+                        #item_path,
+                        yeollin_plugin::vespera::axum::routing::get(get_content)
+                            .put(update_content)
+                            .delete(delete_content),
+                    )
+                    .route(
+                        #publish_path,
+                        yeollin_plugin::vespera::axum::routing::post(publish_content),
+                    )
+                    .route(
+                        #unpublish_path,
+                        yeollin_plugin::vespera::axum::routing::post(unpublish_content),
+                    );
+                yeollin_plugin::ContentCollection::new(registration, router)
+            }
+
+            #[yeollin_plugin::vespera::route(get, path = #collection_path, tags = [#name])]
+            pub async fn list_content(
+                yeollin_plugin::vespera::axum::Extension(db):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::DatabaseConnection>,
+                yeollin_plugin::vespera::axum::Extension(current):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::CurrentUser>,
+                yeollin_plugin::vespera::axum::extract::Query(query):
+                    yeollin_plugin::vespera::axum::extract::Query<#list_query>,
+            ) -> Result<yeollin_plugin::vespera::axum::Json<#list_response>, yeollin_plugin::PluginError> {
+                yeollin_plugin::Authorize::require_role(&current, "admin")?;
+                let page = query.page.unwrap_or(1);
+                let page_size = query.page_size.unwrap_or(yeollin_plugin::DEFAULT_CONTENT_PAGE_SIZE);
+                let result = yeollin_plugin::ContentRepository::<#fields>::new(db, #name)
+                    .list(page, page_size, query.status)
+                    .await?;
+                Ok(yeollin_plugin::vespera::axum::Json(result.into()))
+            }
+
+            #[yeollin_plugin::vespera::route(get, path = #item_path, tags = [#name])]
+            pub async fn get_content(
+                yeollin_plugin::vespera::axum::Extension(db):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::DatabaseConnection>,
+                yeollin_plugin::vespera::axum::Extension(current):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::CurrentUser>,
+                yeollin_plugin::vespera::axum::extract::Path(id):
+                    yeollin_plugin::vespera::axum::extract::Path<String>,
+            ) -> Result<yeollin_plugin::vespera::axum::Json<#response>, yeollin_plugin::PluginError> {
+                yeollin_plugin::Authorize::require_role(&current, "admin")?;
+                let result = yeollin_plugin::ContentRepository::<#fields>::new(db, #name)
+                    .get(&id)
+                    .await?;
+                Ok(yeollin_plugin::vespera::axum::Json(result.into()))
+            }
+
+            #[yeollin_plugin::vespera::route(post, path = #collection_path, tags = [#name])]
+            pub async fn create_content(
+                yeollin_plugin::vespera::axum::Extension(db):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::DatabaseConnection>,
+                yeollin_plugin::vespera::axum::Extension(events):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::EventBus>,
+                yeollin_plugin::vespera::axum::Extension(current):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::CurrentUser>,
+                yeollin_plugin::vespera::axum::Json(request):
+                    yeollin_plugin::vespera::axum::Json<#create_request>,
+            ) -> Result<yeollin_plugin::vespera::axum::Json<#response>, yeollin_plugin::PluginError> {
+                yeollin_plugin::Authorize::require_role(&current, "admin")?;
+                let result = yeollin_plugin::ContentRepository::<#fields>::new(db, #name)
+                    .create(
+                        &events,
+                        &current.sub,
+                        yeollin_plugin::NewContent {
+                            title: request.title,
+                            slug: request.slug,
+                            fields: request.fields,
+                        },
+                    )
+                    .await?;
+                Ok(yeollin_plugin::vespera::axum::Json(result.into()))
+            }
+
+            #[yeollin_plugin::vespera::route(put, path = #item_path, tags = [#name])]
+            pub async fn update_content(
+                yeollin_plugin::vespera::axum::Extension(db):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::DatabaseConnection>,
+                yeollin_plugin::vespera::axum::Extension(events):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::EventBus>,
+                yeollin_plugin::vespera::axum::Extension(current):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::CurrentUser>,
+                yeollin_plugin::vespera::axum::extract::Path(id):
+                    yeollin_plugin::vespera::axum::extract::Path<String>,
+                yeollin_plugin::vespera::axum::Json(request):
+                    yeollin_plugin::vespera::axum::Json<#update_request>,
+            ) -> Result<yeollin_plugin::vespera::axum::Json<#response>, yeollin_plugin::PluginError> {
+                yeollin_plugin::Authorize::require_role(&current, "admin")?;
+                let result = yeollin_plugin::ContentRepository::<#fields>::new(db, #name)
+                    .update(
+                        &events,
+                        &current.sub,
+                        &id,
+                        yeollin_plugin::ContentPatch {
+                            title: request.title,
+                            slug: request.slug,
+                            fields: request.fields,
+                        },
+                    )
+                    .await?;
+                Ok(yeollin_plugin::vespera::axum::Json(result.into()))
+            }
+
+            #[yeollin_plugin::vespera::route(post, path = #publish_path, tags = [#name])]
+            pub async fn publish_content(
+                yeollin_plugin::vespera::axum::Extension(db):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::DatabaseConnection>,
+                yeollin_plugin::vespera::axum::Extension(events):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::EventBus>,
+                yeollin_plugin::vespera::axum::Extension(current):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::CurrentUser>,
+                yeollin_plugin::vespera::axum::extract::Path(id):
+                    yeollin_plugin::vespera::axum::extract::Path<String>,
+            ) -> Result<yeollin_plugin::vespera::axum::Json<#response>, yeollin_plugin::PluginError> {
+                yeollin_plugin::Authorize::require_role(&current, "admin")?;
+                let result = yeollin_plugin::ContentRepository::<#fields>::new(db, #name)
+                    .publish(&events, &current.sub, &id)
+                    .await?;
+                Ok(yeollin_plugin::vespera::axum::Json(result.into()))
+            }
+
+            #[yeollin_plugin::vespera::route(post, path = #unpublish_path, tags = [#name])]
+            pub async fn unpublish_content(
+                yeollin_plugin::vespera::axum::Extension(db):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::DatabaseConnection>,
+                yeollin_plugin::vespera::axum::Extension(events):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::EventBus>,
+                yeollin_plugin::vespera::axum::Extension(current):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::CurrentUser>,
+                yeollin_plugin::vespera::axum::extract::Path(id):
+                    yeollin_plugin::vespera::axum::extract::Path<String>,
+            ) -> Result<yeollin_plugin::vespera::axum::Json<#response>, yeollin_plugin::PluginError> {
+                yeollin_plugin::Authorize::require_role(&current, "admin")?;
+                let result = yeollin_plugin::ContentRepository::<#fields>::new(db, #name)
+                    .unpublish(&events, &current.sub, &id)
+                    .await?;
+                Ok(yeollin_plugin::vespera::axum::Json(result.into()))
+            }
+
+            #[yeollin_plugin::vespera::route(delete, path = #item_path, tags = [#name])]
+            pub async fn delete_content(
+                yeollin_plugin::vespera::axum::Extension(db):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::DatabaseConnection>,
+                yeollin_plugin::vespera::axum::Extension(events):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::EventBus>,
+                yeollin_plugin::vespera::axum::Extension(current):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::CurrentUser>,
+                yeollin_plugin::vespera::axum::extract::Path(id):
+                    yeollin_plugin::vespera::axum::extract::Path<String>,
+            ) -> Result<yeollin_plugin::vespera::axum::Json<#delete_response>, yeollin_plugin::PluginError> {
+                yeollin_plugin::Authorize::require_role(&current, "admin")?;
+                let deleted_id = yeollin_plugin::ContentRepository::<#fields>::new(db, #name)
+                    .delete(&events, &current.sub, &id)
+                    .await?;
+                Ok(yeollin_plugin::vespera::axum::Json(#delete_response {
+                    success: true,
+                    deleted_id,
+                }))
+            }
+
+            #[yeollin_plugin::vespera::route(get, path = #published_path, tags = [#name])]
+            pub async fn published_content(
+                yeollin_plugin::vespera::axum::Extension(db):
+                    yeollin_plugin::vespera::axum::Extension<yeollin_plugin::DatabaseConnection>,
+                yeollin_plugin::vespera::axum::extract::Query(query):
+                    yeollin_plugin::vespera::axum::extract::Query<#published_query>,
+            ) -> Result<yeollin_plugin::vespera::axum::Json<#response>, yeollin_plugin::PluginError> {
+                let result = yeollin_plugin::ContentRepository::<#fields>::new(db, #name)
+                    .published(&query.slug)
+                    .await?;
+                Ok(yeollin_plugin::vespera::axum::Json(result.into()))
+            }
+        }
+    })
+}
+
+// ============================================================
 // yeollin_plugin! macro
 // ============================================================
 
@@ -46,6 +447,7 @@ struct PluginDef {
     frontend: Option<bool>,
     api_base: Option<LitStr>,
     settings: Option<Path>,
+    collections: Vec<Expr>,
     subscribers: Vec<Expr>,
     public_api_routes: Vec<LitStr>,
     runtime_storage: bool,
@@ -61,6 +463,7 @@ impl Parse for PluginDef {
         let mut frontend: Option<bool> = None;
         let mut api_base: Option<LitStr> = None;
         let mut settings: Option<Path> = None;
+        let mut collections = vec![];
         let mut subscribers = vec![];
         let mut public_api_routes = vec![];
         let mut runtime_storage = false;
@@ -92,6 +495,13 @@ impl Parse for PluginDef {
                 }
                 "settings" => {
                     settings = Some(input.parse()?);
+                }
+                "collections" => {
+                    let content;
+                    bracketed!(content in input);
+                    collections = Punctuated::<Expr, Token![,]>::parse_terminated(&content)?
+                        .into_iter()
+                        .collect();
                 }
                 "subscribers" => {
                     let content;
@@ -139,6 +549,7 @@ impl Parse for PluginDef {
             frontend,
             api_base,
             settings,
+            collections,
             subscribers,
             public_api_routes,
             runtime_storage,
@@ -479,6 +890,12 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
     let subscriber_setters = def.subscribers.iter().map(|subscriber| {
         quote! { .subscriber(#subscriber) }
     });
+    let api_prefix_lit = LitStr::new(&api_prefix, name_lit.span());
+    let collection_setters = def.collections.iter().map(|collection| {
+        quote! {
+            .content_collection((#collection).for_plugin(#name_lit, #api_prefix_lit))
+        }
+    });
 
     let expanded = quote! {
         #settings_tokens
@@ -502,6 +919,7 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
                 #on_init_setter
                 #frontend_setters
                 #settings_setter
+                #(#collection_setters)*
                 #(#subscriber_setters)*
                 #(#public_api_setters)*
                 #runtime_storage_setter
@@ -670,7 +1088,10 @@ pub fn yeollin_app(input: TokenStream) -> TokenStream {
 
 #[cfg(test)]
 mod api_base_tests {
-    use super::{resolve_api_prefix, resolve_public_api_route, PluginDef};
+    use super::{
+        resolve_api_prefix, resolve_public_api_route, validate_collection_name,
+        ContentCollectionDef, PluginDef,
+    };
     use syn::LitStr;
 
     fn prefix_of(declaration: &str) -> String {
@@ -756,6 +1177,38 @@ mod api_base_tests {
             syn::parse_str(r#"name: "x", subscribers: [crate::first(), crate::second()]"#).unwrap();
 
         assert_eq!(def.subscribers.len(), 2);
+    }
+
+    #[test]
+    fn accepts_content_collection_registrations() {
+        let def: PluginDef =
+            syn::parse_str(r#"name: "content", collections: [pages::registration()]"#).unwrap();
+
+        assert_eq!(def.collections.len(), 1);
+    }
+
+    #[test]
+    fn parses_a_typed_content_collection() {
+        let def: ContentCollectionDef = syn::parse_str(
+            r#"module: pages, name: "pages", label: "Pages", fields: crate::PageFields, order: 30"#,
+        )
+        .unwrap();
+
+        assert_eq!(def.module, "pages");
+        assert_eq!(def.name.value(), "pages");
+        assert_eq!(def.label.value(), "Pages");
+        assert_eq!(def.order.base10_parse::<i32>().unwrap(), 30);
+    }
+
+    #[test]
+    fn rejects_non_canonical_content_collection_names() {
+        for name in ["", "Pages", "blog_posts", "blog/pages", "-pages"] {
+            assert!(validate_collection_name(&LitStr::new(
+                name,
+                proc_macro2::Span::call_site()
+            ))
+            .is_err());
+        }
     }
 
     #[test]

@@ -1,0 +1,15 @@
+[package]
+name = "content"
+version = "0.1.0"
+edition = "2021"
+description = "A Yeollin CMS plugin"
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+yeollin-plugin = { workspace = true }
+vespera = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

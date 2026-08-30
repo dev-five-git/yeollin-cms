@@ -899,6 +899,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "content"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "vespera",
+ "yeollin-plugin",
+]
+
+[[package]]
 name = "cookie"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1335,6 +1345,7 @@ dependencies = [
  "anyhow",
  "audit-log",
  "auth",
+ "content",
  "example-memo-plugin",
  "example-plugin",
  "media",
@@ -5248,6 +5259,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "rand 0.10.2",
  "sea-orm",
  "serde",
  "serde_json",

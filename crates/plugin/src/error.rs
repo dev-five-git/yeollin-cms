@@ -159,6 +159,28 @@ impl From<yeollin_core::EventError> for PluginError {
     }
 }
 
+impl From<yeollin_core::ContentError> for PluginError {
+    fn from(error: yeollin_core::ContentError) -> Self {
+        match error {
+            yeollin_core::ContentError::Invalid(message) => Self::bad_request(message),
+            yeollin_core::ContentError::NotFound => Self::not_found("Content entry not found"),
+            yeollin_core::ContentError::DuplicateSlug(slug) => {
+                Self::conflict(format!("Slug `{slug}` is already in use"))
+            }
+            yeollin_core::ContentError::InvalidStoredStatus(status) => {
+                tracing::error!(%status, "content entry has invalid stored status");
+                Self::internal()
+            }
+            yeollin_core::ContentError::Serialize(error) => {
+                tracing::error!(%error, "could not serialize typed content fields");
+                Self::internal()
+            }
+            yeollin_core::ContentError::Database(error) => Self::from(error),
+            yeollin_core::ContentError::Event(error) => Self::from(error),
+        }
+    }
+}
+
 impl From<yeollin_core::StorageError> for PluginError {
     fn from(error: yeollin_core::StorageError) -> Self {
         tracing::error!(%error, "plugin runtime storage error");

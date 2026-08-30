@@ -12,8 +12,8 @@ use std::{path::PathBuf, sync::Arc};
 use vespera::Schema;
 use yeollin_auth::{auth_middleware, AuthConfig, AuthState};
 use yeollin_core::{
-    compile_route_manifest, EventBus, ExportEnvelope, MenuConfig, PluginInfo, RouteAccess,
-    RouteEntry, RouteSource, RuntimeStorage, SettingsRegistration, SettingsStore,
+    build_menu, compile_route_manifest, EventBus, ExportEnvelope, MenuConfig, PluginInfo,
+    RouteAccess, RouteEntry, RouteSource, RuntimeStorage, SettingsRegistration, SettingsStore,
     SubscriberRegistration, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION,
 };
 use yeollin_plugin::PluginMetadata;
@@ -63,6 +63,8 @@ pub struct YeollinApp {
     runtime_storage: Option<RuntimeStorage>,
     /// Plugins that cannot serve without runtime storage.
     storage_required_by: Vec<String>,
+    /// Typed content collections require the shared database repository.
+    content_required_by: Vec<String>,
 }
 
 impl YeollinApp {
@@ -132,6 +134,12 @@ impl YeollinApp {
             }
             if !self.subscriber_registrations.is_empty() {
                 anyhow::bail!("plugins register event subscribers but no database is configured");
+            }
+            if !self.content_required_by.is_empty() {
+                anyhow::bail!(
+                    "content collections are registered by plugins [{}] but no database is configured",
+                    self.content_required_by.join(", ")
+                );
             }
             None
         };
@@ -410,7 +418,9 @@ impl YeollinAppBuilder {
         let mut page_routes: Vec<RouteEntry> = vec![];
         let mut public_api_routes = vec![];
         let mut storage_required_by = vec![];
+        let mut content_required_by = vec![];
         let mut request_body_limit = None;
+        let mut collection_names = std::collections::HashSet::new();
 
         if let Some((path, embedded)) = self.app_frontend {
             if std::path::Path::new(path).is_dir() {
@@ -451,6 +461,23 @@ impl YeollinAppBuilder {
                     .iter()
                     .map(|route| route.to_string()),
             );
+            let collection_infos = plugin
+                .content_collections
+                .iter()
+                .map(|collection| {
+                    if !collection_names.insert(collection.name()) {
+                        panic!(
+                            "content collection `{}` is registered more than once",
+                            collection.name()
+                        );
+                    }
+                    public_api_routes.push(collection.public_api_path().to_string());
+                    collection.export_info()
+                })
+                .collect::<Vec<_>>();
+            if !collection_infos.is_empty() {
+                content_required_by.push(plugin.name.to_string());
+            }
             if plugin.requires_runtime_storage {
                 storage_required_by.push(plugin.name.to_string());
             }
@@ -472,6 +499,7 @@ impl YeollinAppBuilder {
                 license: plugin.license.map(|s| s.to_string()),
                 frontend_path: plugin.frontend_path.map(|s| s.to_string()),
                 settings: settings_info,
+                collections: collection_infos,
             });
 
             if let Some(settings) = plugin.settings {
@@ -496,12 +524,51 @@ impl YeollinAppBuilder {
             // Merge the router
             router = router.merge(plugin.router);
 
-            // Collect menus
-            if let Some(menu) = plugin.frontend.menu() {
-                menus.push(menu.clone());
+            let mut plugin_routes = plugin.frontend.routes().to_vec();
+            if !plugin.content_collections.is_empty() {
+                let root_path = format!("/{}", plugin.name);
+                if !plugin_routes.iter().any(|route| route.path == root_path) {
+                    plugin_routes.push(RouteEntry {
+                        path: root_path,
+                        plugin: Some(plugin.name.to_string()),
+                        label: humanize_identifier(plugin.name),
+                        icon: None,
+                        order: plugin
+                            .content_collections
+                            .iter()
+                            .map(|collection| collection.order())
+                            .min()
+                            .unwrap_or(50),
+                        access: RouteAccess::Authenticated,
+                        menu: true,
+                    });
+                }
+                for collection in &plugin.content_collections {
+                    if plugin_routes
+                        .iter()
+                        .any(|route| route.path == collection.page_path())
+                    {
+                        panic!(
+                            "content collection page `{}` collides with a plugin frontend route",
+                            collection.page_path()
+                        );
+                    }
+                    plugin_routes.push(RouteEntry {
+                        path: collection.page_path().to_string(),
+                        plugin: Some(plugin.name.to_string()),
+                        label: collection.label().to_string(),
+                        icon: None,
+                        order: collection.order(),
+                        access: RouteAccess::Authenticated,
+                        menu: true,
+                    });
+                }
             }
 
-            page_routes.extend(plugin.frontend.routes().iter().cloned());
+            if let Some(menu) = build_menu(&plugin_routes, plugin.name) {
+                menus.push(menu);
+            }
+            page_routes.extend(plugin_routes);
         }
 
         let state = AppState::new(self.host, self.port);
@@ -602,6 +669,7 @@ impl YeollinAppBuilder {
             subscriber_registrations,
             runtime_storage,
             storage_required_by,
+            content_required_by,
         }
     }
 }
@@ -636,7 +704,23 @@ pub async fn get_plugins(Extension(plugins): Extension<SharedPlugins>) -> Json<V
             license: p.license.clone(),
             frontend_path: None,
             settings: p.settings.clone(),
+            collections: p.collections.clone(),
         })
         .collect();
     Json(public_plugins)
+}
+
+fn humanize_identifier(value: &str) -> String {
+    value
+        .split(['-', '_'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect::<String>())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }

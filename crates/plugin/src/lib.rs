@@ -27,20 +27,23 @@ pub use error::*;
 pub use frontend::*;
 pub use metadata::*;
 
-// Re-export yeollin_plugin! proc-macro (auto-infers export name from plugin name)
-pub use yeollin_plugin_macros::yeollin_plugin;
+// Re-export plugin declaration macros.
+pub use yeollin_plugin_macros::{yeollin_content_collection, yeollin_plugin};
 
 // Re-export for convenience
 pub use include_dir;
 pub use sea_orm;
+pub use serde;
 pub use serde_json;
 pub use vespera;
 pub use yeollin_auth;
 pub use yeollin_core;
 pub use yeollin_core::{
-    Event, EventBus, EventEnvelope, EventError, EventTransaction, InlineSubscriberFuture,
-    RuntimeStorage, SettingsError, SettingsRegistration, SettingsStore, StorageError,
-    SubscriberMode, SubscriberRegistration,
+    ContentCollectionRegistration, ContentError, ContentFields, ContentPage, ContentPatch,
+    ContentRecord, ContentRepository, ContentStatus, Event, EventBus, EventEnvelope, EventError,
+    EventTransaction, InlineSubscriberFuture, NewContent, RuntimeStorage, SettingsError,
+    SettingsRegistration, SettingsStore, StorageError, SubscriberMode, SubscriberRegistration,
+    DEFAULT_CONTENT_PAGE_SIZE,
 };
 
 // Re-export commonly used auth types

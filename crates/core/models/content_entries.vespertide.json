@@ -1,0 +1,72 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/model.schema.json",
+  "name": "content_entries",
+  "description": "Typed collection entries with framework-owned publication metadata",
+  "columns": [
+    {
+      "name": "id",
+      "type": "text",
+      "nullable": false,
+      "primary_key": true
+    },
+    {
+      "name": "collection",
+      "type": "text",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "title",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "slug",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "status",
+      "type": "text",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "author",
+      "type": "text",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "fields",
+      "type": "json",
+      "nullable": false
+    },
+    {
+      "name": "created_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()",
+      "index": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()"
+    },
+    {
+      "name": "published_at",
+      "type": "timestamptz",
+      "nullable": true,
+      "index": true
+    }
+  ],
+  "constraints": [
+    {
+      "type": "unique",
+      "name": "uq_content_entries_collection_slug",
+      "columns": ["collection", "slug"]
+    }
+  ]
+}

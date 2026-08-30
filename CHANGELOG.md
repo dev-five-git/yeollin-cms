@@ -21,6 +21,8 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Added
 
+- Compile-time typed content collections through `yeollin_content_collection!` and the `collections` plugin declaration. Collection field types drive concrete handlers, validation, exported schemas, and generated editor pages while the framework owns IDs, collection-scoped slugs, author, and timestamps.
+- A shared draft/published content repository with paginated administrator CRUD, transactional `content.created` / `updated` / `published` / `unpublished` / `deleted` audit events, and an exact public-by-slug endpoint that exposes only published entries. The reference `content` plugin ships a typed `pages` collection with media-reference validation.
 - The `media` plugin provides an administrator media library, typed multipart image uploads, paginated metadata, deletion, and a public serving route. JPEG, PNG, GIF, and WebP are verified from their signatures; upload size has a 10 MiB hard ceiling and a typed 1–10 MiB setting.
 - Writable runtime object storage through `YeollinAppBuilder::with_storage_dir` and the `RuntimeStorage` plugin extension. Objects use namespace/shard/opaque-key paths outside the embedded frontend, and required storage is initialized only after metadata export exits.
 - Plugins can declare exact `public_api_routes` and a multipart `request_body_limit` in `yeollin_plugin!`. Public API declarations reject roots, dynamic segments, queries, traversal, and trailing slashes so path-based authentication stays exact.

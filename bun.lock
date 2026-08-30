@@ -77,6 +77,10 @@
         "vinext": "^1.0.0-beta.8",
       },
     },
+    "plugins/content": {
+      "name": "@yeollin-plugin/content",
+      "version": "0.1.0",
+    },
     "plugins/example-memo-plugin": {
       "name": "@yeollin-plugin/example-memo-plugin",
       "version": "0.1.0",
@@ -514,6 +518,8 @@
     "@yeollin-plugin/audit-log": ["@yeollin-plugin/audit-log@workspace:plugins/audit-log"],
 
     "@yeollin-plugin/auth": ["@yeollin-plugin/auth@workspace:plugins/auth"],
+
+    "@yeollin-plugin/content": ["@yeollin-plugin/content@workspace:plugins/content"],
 
     "@yeollin-plugin/example-memo-plugin": ["@yeollin-plugin/example-memo-plugin@workspace:plugins/example-memo-plugin"],
 
