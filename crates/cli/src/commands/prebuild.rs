@@ -316,7 +316,7 @@ pub async fn run_prebuild(
 
     // 5. If frontend exists, merge dependencies, link, and collect public routes
     if let Some(app) = frontend {
-        merge_dependencies(output_dir, app_dir).await?;
+        merge_dependencies(output_dir, app_dir, metadata).await?;
         info!("Merged dependencies");
 
         if use_proxy {
@@ -411,70 +411,98 @@ async fn prepare_output_dir(output_dir: &Path, force: bool) -> Result<()> {
 }
 
 /// Merge dependencies from current directory's package.json into output
-async fn merge_dependencies(output_dir: &Path, app_dir: &Path) -> Result<()> {
+/// Merge the frontend dependencies of the host app and every plugin into the
+/// generated app.
+///
+/// Only `dependencies` are merged. A `devDependencies` entry belongs to that
+/// crate's own editor and typecheck setup; the assembled app gets its tooling
+/// from the template.
+///
+/// A conflicting requirement is an error rather than a silent skip: the loser
+/// would resolve against a version its pages were not written for, which is
+/// exactly the failure this merge exists to prevent.
+async fn merge_dependencies(
+    output_dir: &Path,
+    app_dir: &Path,
+    metadata: Option<&ExportEnvelope>,
+) -> Result<()> {
     let output_package = output_dir.join("package.json");
-    let app_package = app_dir.join("package.json");
-
-    if !output_package.exists() || !app_package.exists() {
+    if !output_package.exists() {
         return Ok(());
     }
 
-    // Read both files IN PARALLEL
-    let (output_content, app_content) = tokio::join!(
-        fs::read_to_string(&output_package),
-        fs::read_to_string(&app_package)
-    );
-    let output_content = output_content?;
-    let app_content = app_content?;
+    let mut output_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&output_package).await?)?;
 
-    let mut output_json: serde_json::Value = serde_json::from_str(&output_content)?;
-    let app_json: serde_json::Value = serde_json::from_str(&app_content)?;
-
-    // Collect all existing package names from both sections to avoid duplicates
-    let existing_deps: std::collections::HashSet<String> = output_json
-        .get("dependencies")
-        .and_then(|d| d.as_object())
-        .map(|obj| obj.keys().cloned().collect())
-        .unwrap_or_default();
-
-    let existing_dev_deps: std::collections::HashSet<String> = output_json
-        .get("devDependencies")
-        .and_then(|d| d.as_object())
-        .map(|obj| obj.keys().cloned().collect())
-        .unwrap_or_default();
-
-    // Merge dependencies
-    if let Some(deps) = app_json.get("dependencies").and_then(|d| d.as_object()) {
-        if let Some(target) = output_json
-            .get_mut("dependencies")
-            .and_then(|d| d.as_object_mut())
-        {
-            for (key, value) in deps {
-                if !existing_deps.contains(key) && !existing_dev_deps.contains(key) {
-                    debug!("Adding dependency: {} = {}", key, value);
-                    target.insert(key.clone(), value.clone());
+    let mut sources: Vec<(String, PathBuf)> = vec![("the application".to_string(), app_dir.to_path_buf())];
+    if let Some(envelope) = metadata {
+        for plugin in &envelope.plugins {
+            if let Some(frontend) = plugin.frontend_path.as_deref() {
+                if let Some(crate_dir) = Path::new(frontend).parent() {
+                    sources.push((format!("plugin `{}`", plugin.name), crate_dir.to_path_buf()));
                 }
             }
         }
     }
 
-    // Merge devDependencies
-    if let Some(deps) = app_json.get("devDependencies").and_then(|d| d.as_object()) {
-        if let Some(target) = output_json
-            .get_mut("devDependencies")
-            .and_then(|d| d.as_object_mut())
-        {
-            for (key, value) in deps {
-                if !existing_deps.contains(key) && !existing_dev_deps.contains(key) {
-                    debug!("Adding devDependency: {} = {}", key, value);
-                    target.insert(key.clone(), value.clone());
-                }
-            }
+    // Remembers who asked for each requirement so a conflict can name both sides.
+    let mut declared_by: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
+    if let Some(existing) = output_json.get("dependencies").and_then(|d| d.as_object()) {
+        for (name, requirement) in existing {
+            declared_by.insert(
+                name.clone(),
+                (
+                    "the app template".to_string(),
+                    requirement.as_str().unwrap_or_default().to_string(),
+                ),
+            );
         }
     }
 
-    let merged = serde_json::to_string_pretty(&output_json)?;
-    fs::write(&output_package, merged).await?;
+    let mut added = 0usize;
+    for (label, dir) in sources {
+        let manifest = dir.join("package.json");
+        if !manifest.exists() {
+            continue;
+        }
+
+        let source_json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest).await?)?;
+        let Some(deps) = source_json.get("dependencies").and_then(|d| d.as_object()) else {
+            continue;
+        };
+
+        for (name, requirement) in deps {
+            let requirement_str = requirement.as_str().unwrap_or_default().to_string();
+
+            if let Some((owner, existing)) = declared_by.get(name) {
+                if existing != &requirement_str {
+                    anyhow::bail!(
+                        "frontend dependency `{name}` is required as `{existing}` by {owner} \
+                         and as `{requirement_str}` by {label}. Align the two declarations, \
+                         or drop the redundant one if the template already provides it."
+                    );
+                }
+                continue;
+            }
+
+            debug!("Adding dependency from {label}: {name} = {requirement_str}");
+            if let Some(target) = output_json
+                .get_mut("dependencies")
+                .and_then(|d| d.as_object_mut())
+            {
+                target.insert(name.clone(), requirement.clone());
+                added += 1;
+            }
+            declared_by.insert(name.clone(), (label.clone(), requirement_str));
+        }
+    }
+
+    fs::write(&output_package, serde_json::to_string_pretty(&output_json)?).await?;
+    if added > 0 {
+        info!(added, "Merged frontend dependencies");
+    }
 
     Ok(())
 }
@@ -1026,11 +1054,13 @@ mod assembly_tests {
         write(&app_dir.join("package.json"), r#"{"dependencies":{}}"#);
         page(&app_dir.join("app"), "(main)");
 
-        let alpha = root.join("plugin-alpha");
+        // Mirrors a real plugin crate: the manifest sits beside `app/`, which is
+        // what `frontend_path` points at.
+        let alpha = root.join("plugin-alpha").join("app");
         page(&alpha, "(alpha)");
         page(&alpha, "(alpha)/items");
 
-        let beta = root.join("plugin-beta");
+        let beta = root.join("plugin-beta").join("app");
         page(&beta, "(beta)");
 
         let frontend = AppFrontend {
@@ -1165,5 +1195,107 @@ mod assembly_tests {
             !files.iter().any(|f| f.contains("plugin-alpha")),
             "no plugin frontend should be copied without metadata"
         );
+    }
+
+    fn manifest_of(tmp: &TempDir, plugin: &str, contents: &str) {
+        write(&tmp.path().join(plugin).join("package.json"), contents);
+    }
+
+    fn dependencies_of(output_dir: &Path) -> serde_json::Value {
+        let raw = std::fs::read_to_string(output_dir.join("package.json")).unwrap();
+        serde_json::from_str::<serde_json::Value>(&raw).unwrap()["dependencies"].clone()
+    }
+
+    async fn assemble(
+        tmp: &TempDir,
+        app_dir: &Path,
+        output_dir: &Path,
+        frontend: &AppFrontend,
+        metadata: &ExportEnvelope,
+    ) -> anyhow::Result<()> {
+        // The template supplies the base dependency set the plugins merge into.
+        write(
+            &output_dir.join("package.json"),
+            r#"{"dependencies":{"react":"^19.2.8"},"devDependencies":{}}"#,
+        );
+        let _ = tmp;
+        run_prebuild(output_dir, app_dir, Some(frontend), Some(metadata), false, false).await
+    }
+
+    #[tokio::test]
+    async fn plugin_dependencies_reach_the_generated_app() {
+        let tmp = TempDir::new().unwrap();
+        let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
+        manifest_of(&tmp, "plugin-alpha", r#"{"dependencies":{"dayjs":"^1.11.23"}}"#);
+
+        assemble(&tmp, &app_dir, &output_dir, &frontend, &metadata)
+            .await
+            .expect("prebuild must succeed");
+
+        assert_eq!(dependencies_of(&output_dir)["dayjs"], "^1.11.23");
+    }
+
+    #[tokio::test]
+    async fn plugin_dev_dependencies_stay_local() {
+        let tmp = TempDir::new().unwrap();
+        let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
+        manifest_of(
+            &tmp,
+            "plugin-alpha",
+            r#"{"devDependencies":{"typescript":"^7.0"}}"#,
+        );
+
+        assemble(&tmp, &app_dir, &output_dir, &frontend, &metadata)
+            .await
+            .unwrap();
+
+        // A plugin's devDependencies configure its own editor and typecheck run;
+        // the assembled app takes its tooling from the template.
+        assert!(dependencies_of(&output_dir)["typescript"].is_null());
+    }
+
+    #[tokio::test]
+    async fn identical_requirements_merge_quietly() {
+        let tmp = TempDir::new().unwrap();
+        let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
+        manifest_of(&tmp, "plugin-alpha", r#"{"dependencies":{"dayjs":"^1.11.23"}}"#);
+        manifest_of(&tmp, "plugin-beta", r#"{"dependencies":{"dayjs":"^1.11.23"}}"#);
+
+        assemble(&tmp, &app_dir, &output_dir, &frontend, &metadata)
+            .await
+            .expect("agreeing plugins must merge");
+
+        assert_eq!(dependencies_of(&output_dir)["dayjs"], "^1.11.23");
+    }
+
+    #[tokio::test]
+    async fn conflicting_requirements_fail_with_both_sides_named() {
+        let tmp = TempDir::new().unwrap();
+        let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
+        manifest_of(&tmp, "plugin-alpha", r#"{"dependencies":{"dayjs":"^1.11.23"}}"#);
+        manifest_of(&tmp, "plugin-beta", r#"{"dependencies":{"dayjs":"^2.0.0"}}"#);
+
+        let error = assemble(&tmp, &app_dir, &output_dir, &frontend, &metadata)
+            .await
+            .expect_err("disagreeing plugins must not silently resolve")
+            .to_string();
+
+        assert!(error.contains("dayjs"), "unexpected error: {error}");
+        assert!(error.contains("plugin-alpha"), "unexpected error: {error}");
+        assert!(error.contains("plugin-beta"), "unexpected error: {error}");
+    }
+
+    #[tokio::test]
+    async fn a_plugin_may_not_contradict_the_template() {
+        let tmp = TempDir::new().unwrap();
+        let (app_dir, output_dir, frontend, metadata) = fixture(&tmp);
+        manifest_of(&tmp, "plugin-alpha", r#"{"dependencies":{"react":"^18.0.0"}}"#);
+
+        let error = assemble(&tmp, &app_dir, &output_dir, &frontend, &metadata)
+            .await
+            .expect_err("a plugin must not silently downgrade a template dependency")
+            .to_string();
+
+        assert!(error.contains("react"), "unexpected error: {error}");
     }
 }

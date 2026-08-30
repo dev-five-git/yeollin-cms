@@ -17,10 +17,12 @@
 //! // Plugin name "my-plugin" → export identifier `MyPlugin`
 //! ```
 
+mod authorize;
 mod error;
 mod frontend;
 mod metadata;
 
+pub use authorize::*;
 pub use error::*;
 pub use frontend::*;
 pub use metadata::*;

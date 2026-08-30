@@ -34,6 +34,9 @@ enum Commands {
 
     /// Build for production (prebuild + next export + cargo build)
     Build(commands::build::BuildArgs),
+
+    /// Register plugins with an application, or check that they are registered
+    Plugin(commands::plugin::PluginArgs),
 }
 
 #[tokio::main]
@@ -59,5 +62,6 @@ async fn main() -> anyhow::Result<()> {
         Commands::Prebuild(args) => commands::prebuild::run(args).await,
         Commands::Dev(args) => commands::dev::run(args).await,
         Commands::Build(args) => commands::build::run(args).await,
+        Commands::Plugin(args) => commands::plugin::run(args).await,
     }
 }

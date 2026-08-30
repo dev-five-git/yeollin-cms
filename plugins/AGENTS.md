@@ -53,14 +53,44 @@ my-plugin/
 └── tsconfig.json            # Extends packages/app/tsconfig.json
 ```
 
+## AUTHORIZATION
+
+The auth middleware establishes *who* is calling; it does not decide *what* they
+may do. Until a handler asks, every signed-in caller reaches every protected
+route. Guard administrative or destructive endpoints explicitly:
+
+```rust
+use yeollin_plugin::{Authorize, CurrentUser, PluginError};
+
+pub async fn delete_everything(
+    Extension(current): Extension<CurrentUser>,
+) -> Result<Json<Done>, PluginError> {
+    current.require_role("admin")?;
+    // ...
+}
+```
+
+`require_any_role(&["admin", "editor"])` accepts several. Refusals are always a
+plain `403 FORBIDDEN`, so probing cannot map out the role model. Role matching is
+exact — `Admin` and `admin` are different roles.
+
 ## CREATING A NEW PLUGIN
 
-1. Copy `example-plugin/` structure
-2. Update `Cargo.toml` name and dependencies (at root, not in `api/`)
-3. Edit `src/lib.rs` with plugin metadata
-4. Add routes in `src/routes/`
-5. Add frontend in `app/(your-group)/`
-6. Run `bun install` from workspace root for TypeScript support
+```bash
+yeollin init my-plugin                    # scaffold plugins/my-plugin
+cd apps/<your-app>
+yeollin plugin add my-plugin              # register it with the app
+yeollin plugin doctor                     # verify both sides agree
+```
+
+`yeollin init` writes the crate; `plugin add` edits the two places an
+application must declare it — its `Cargo.toml` dependency and the `yeollin_app!`
+plugin list. Re-running `add` is a no-op. The workspace `members` list is
+globbed, so it needs no edit.
+
+Cargo resolves the dependency graph before proc macros run, so a plugin cannot be
+discovered at compile time. `plugin doctor` exists because half a registration
+either fails to compile or silently omits the plugin's routes and migrations.
 
 ## TYPESCRIPT SETUP
 

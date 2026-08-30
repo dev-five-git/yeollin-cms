@@ -21,7 +21,13 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Added
 
+- `yeollin plugin add` registers a plugin with an application, editing both its `Cargo.toml` dependency and the `yeollin_app!` list. `yeollin plugin doctor` reports plugins that are declared on only one side. The workspace `members` list is globbed, so creating a plugin no longer requires editing it.
+- `Authorize` on `CurrentUser` (`require_role`, `require_any_role`, `has_role`) for guarding routes that authentication alone does not protect. `GET /api/auth/users` uses it.
 - `auth` plugin: users and sessions tables, `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/me`, and first-administrator bootstrap from `YEOLLIN_ADMIN_USERNAME` / `YEOLLIN_ADMIN_PASSWORD`.
+
+### Fixed
+
+- Plugin `dependencies` from `package.json` are merged into the generated frontend. Previously only the host application's were, so a plugin's JavaScript dependency was never installed and its pages resolved against whatever the workspace happened to hoist. Conflicting requirements now fail the build instead of resolving silently; `devDependencies` stay local to each crate.
 - `api_base` on `yeollin_plugin!` for plugins whose URL namespace should differ from their name. It must not contain `api`, which is always prepended.
 - `route-manifest.json` generated at prebuild alongside `menus.json` and `plugins.json`.
 

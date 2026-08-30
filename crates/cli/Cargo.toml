@@ -33,6 +33,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 dunce = { workspace = true }
 rand = { workspace = true }
+toml_edit = { workspace = true }
 
 # Internal
 yeollin-core = { workspace = true }
