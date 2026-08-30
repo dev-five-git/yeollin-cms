@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| {
-                    "example_app=debug,yeollin=debug,auth_users=info,tower_http=debug".into()
+                    "example_app=debug,yeollin=debug,auth=info,tower_http=debug".into()
                 }),
         )
         // stdout is reserved for the metadata export envelope, so logs go to stderr.
@@ -33,14 +33,14 @@ async fn main() -> anyhow::Result<()> {
     // weak secret before it serves traffic.
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_default();
 
-    // Credentials live in the auth-users plugin, not here. It seeds the first
+    // Credentials live in the auth plugin, not here. It seeds the first
     // administrator from YEOLLIN_ADMIN_USERNAME / YEOLLIN_ADMIN_PASSWORD.
     let auth_config = AuthConfig::new(jwt_secret);
 
     // Create app builder using yeollin_app! macro
     // This macro handles both register_plugin() and vespera merge in one call
     let app = yeollin::yeollin_app! {
-        plugins: [auth_users, example_plugin, example_memo_plugin],
+        plugins: [auth, example_plugin, example_memo_plugin],
         openapi: "openapi.json",
         title: "Example CMS API",
         version: "1.0.0",

@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/model.schema.json",
-  "name": "users",
-  "description": "Authenticated principals for auth-users",
+  "name": "sessions",
+  "description": "Refresh-token sessions for the auth plugin",
   "columns": [
     {
       "name": "id",
@@ -10,28 +10,28 @@
       "primary_key": { "auto_increment": true }
     },
     {
-      "name": "username",
+      "name": "user_id",
+      "type": "integer",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "refresh_token_hash",
       "type": "text",
       "nullable": false
     },
     {
-      "name": "password_hash",
-      "type": "text",
+      "name": "expires_at",
+      "type": "timestamptz",
       "nullable": false
     },
     {
-      "name": "role",
-      "type": "text",
-      "nullable": false
+      "name": "revoked_at",
+      "type": "timestamptz",
+      "nullable": true
     },
     {
       "name": "created_at",
-      "type": "timestamptz",
-      "nullable": false,
-      "default": "NOW()"
-    },
-    {
-      "name": "updated_at",
       "type": "timestamptz",
       "nullable": false,
       "default": "NOW()"
@@ -40,8 +40,8 @@
   "constraints": [
     {
       "type": "unique",
-      "name": "uq_auth_users_username",
-      "columns": ["username"]
+      "name": "uq_auth_sessions_refresh_token_hash",
+      "columns": ["refresh_token_hash"]
     }
   ]
 }

@@ -6,7 +6,7 @@ both the API and the statically exported frontend.
 
 ```mermaid
 flowchart TB
-    subgraph CLI["üîß yeollin-cli"]
+    subgraph CLI["?îß yeollin-cli"]
         direction LR
         init["init"]
         prebuild["prebuild"]
@@ -14,7 +14,7 @@ flowchart TB
         build["build"]
     end
 
-    subgraph CoreCrates["ü¶Ä Rust Core Crates"]
+    subgraph CoreCrates["?? Rust Core Crates"]
         direction TB
         core["yeollin-core<br/>(ContentMeta, MenuItem, MenuConfig)"]
         auth["yeollin-auth<br/>(JWT, Argon2, Middleware)"]
@@ -23,21 +23,21 @@ flowchart TB
         appLib["yeollin-app<br/>(YeollinApp, YeollinAppBuilder)"]
     end
 
-    subgraph Plugins["üß© Plugins (Rust Crate + vinext)"]
+    subgraph Plugins["?ß© Plugins (Rust Crate + vinext)"]
         direction TB
         subgraph P1["example-plugin"]
             p1routes["API Routes<br/>/api/example/*"]
             p1fe["Frontend Pages<br/>app/(group)/page.tsx"]
         end
         subgraph P2["example-memo-plugin"]
-            p2routes["API Routes<br/>/memo/*"]
+            p2routes["API Routes<br/>/api/example-memo-plugin/*"]
             p2fe["Frontend Pages"]
             p2model["SeaORM Models"]
             p2migrate["Vespertide Migrations"]
         end
     end
 
-    subgraph Frontend["‚öõÔ∏è Frontend (packages/app)"]
+    subgraph Frontend["?õÔ∏è Frontend (packages/app)"]
         direction TB
         vinext["vinext + Vite 8 + React 19"]
         devupui["@devup-ui/react"]
@@ -45,7 +45,7 @@ flowchart TB
         rq["@tanstack/react-query"]
     end
 
-    subgraph Runtime["üöÄ Runtime (Single Binary)"]
+    subgraph Runtime["?? Runtime (Single Binary)"]
         direction TB
         axum["Axum Router<br/>(port 3001)"]
         subgraph Services["Services"]
@@ -58,7 +58,7 @@ flowchart TB
         end
     end
 
-    subgraph BuildOutput["üì¶ Build Output"]
+    subgraph BuildOutput["?ì¶ Build Output"]
         direction LR
         dotYeollin[".yeollin/app/<br/>(assembled frontend)"]
         binary["Single Binary<br/>(API + Static + DB)"]
@@ -108,13 +108,13 @@ flowchart TB
 
 ## Build flow
 
-1. `cargo build` ‚Äî produces a binary that can export plugin/menu metadata via
+1. `cargo build` ??produces a binary that can export plugin/menu metadata via
    `YEOLLIN_EXPORT_PLUGINS` / `YEOLLIN_EXPORT_MENUS`.
-2. `yeollin prebuild` ‚Äî extracts the `packages/app` template into `.yeollin/app/`,
+2. `yeollin prebuild` ??extracts the `packages/app` template into `.yeollin/app/`,
    copies each plugin's `app/` pages in, and writes `menus.json` / `plugins.json`.
-3. `vinext build` ‚Äî static export to `.yeollin/app/dist/client/`, then the CLI
+3. `vinext build` ??static export to `.yeollin/app/dist/client/`, then the CLI
    copies the client output to `.yeollin/app/out/`.
-4. `cargo build --release` ‚Äî final binary, embedding static files via `include_dir!`.
+4. `cargo build --release` ??final binary, embedding static files via `include_dir!`.
 
 ## Dev mode
 

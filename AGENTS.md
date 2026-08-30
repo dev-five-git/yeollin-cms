@@ -81,6 +81,9 @@ yeollin_plugin::yeollin_plugin! {
 - **Plugin frontend**: `plugins/<name>/app/` with `(group)/` route groups
 - **Route metadata**: `route.meta.json` next to `page.tsx`. `access` is `authenticated`
   (default) / `public` / `guest`. Directory names grant nothing
+- **Plugin API namespace**: `/api/<name>`, overridable with `api_base`. Handler file
+  location does not affect the URL; `src/routes/mod.rs` sits at the namespace root
+- **URLs use hyphens**: underscores in path segments are converted to `-`
 - **Routes**: Vespera macros `#[vespera::route(get, path = "...", tags = ["..."])]`
 - **State**: Extension layer for SharedMenus, SharedPlugins
 - **Logs go to stderr**: stdout is reserved for the `YEOLLIN_EXPORT` envelope
@@ -92,6 +95,7 @@ yeollin_plugin::yeollin_plugin! {
 - **NO** direct edits to `.yeollin/` (regenerated at prebuild)
 - **NO** symlinks in dev mode (use proxy or copy mode)
 - **NO** deriving access from `(public)` / `(guest)` directory names — declare it in `route.meta.json`
+- **NO** backend routes outside `/api`, and **NO** `api` inside `api_base`
 - **NO** prefix matching for public/guest routes — matching is whole-path exact
 - **NO** work before the export branch in `YeollinApp::run` (no DB, no secrets)
 

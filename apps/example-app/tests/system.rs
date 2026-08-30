@@ -1,7 +1,7 @@
 //! Boots the real binary and drives it over HTTP.
 //!
 //! Unit tests cover each rule in isolation; this exercises the assembled system:
-//! plugin registration, migrations, the auth middleware, and the auth-users
+//! plugin registration, migrations, the auth middleware, and the auth
 //! routes all have to agree for these to pass.
 
 use std::net::TcpListener;
@@ -97,7 +97,11 @@ async fn assembled_system_enforces_authentication() {
     assert_eq!(protected.status(), 401, "API must reject anonymous callers");
 
     // The suffix that previously reached a handler without authentication.
-    let bypass = client.get(server.url("/memo/1.ico")).send().await.unwrap();
+    let bypass = client
+        .get(server.url("/api/example-memo-plugin/1.ico"))
+        .send()
+        .await
+        .unwrap();
     assert_ne!(
         bypass.status(),
         400,

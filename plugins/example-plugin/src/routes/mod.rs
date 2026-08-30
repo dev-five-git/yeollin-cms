@@ -1,2 +1,3 @@
-//! Example plugin routes
-pub mod api;
+//! Route handlers
+
+pub mod items;

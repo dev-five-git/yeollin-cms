@@ -1,4 +1,4 @@
-//! /api/example/items routes
+//! Item routes, mounted under the plugin API namespace.
 
 use serde::{Deserialize, Serialize};
 use vespera::axum::{extract::Path, Json};

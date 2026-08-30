@@ -27,7 +27,7 @@ const ADMIN_PASSWORD_VAR: &str = "YEOLLIN_ADMIN_PASSWORD";
 pub const SESSION_PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 yeollin_plugin::yeollin_plugin! {
-    name: "auth-users",
+    name: "auth",
     author: "DevFive",
     description: "Database-backed users and sessions",
     on_init: initialize,

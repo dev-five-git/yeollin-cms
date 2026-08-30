@@ -34,7 +34,7 @@ prebuild time and is never the app you run directly.
 ## Run the development server
 
 `apps/example-app` is the standalone application used for local development. It
-registers the `auth-users`, `example-plugin`, and `example-memo-plugin` crates
+registers the `auth`, `example-plugin`, and `example-memo-plugin` crates
 through the `yeollin_app!` macro.
 
 ```bash
@@ -94,7 +94,7 @@ A deployed binary is never given a secret automatically. See
 
 ## Create the first administrator
 
-The framework itself has no credential store. The `auth-users` plugin owns users
+The framework itself has no credential store. the `auth` plugin owns users
 and sessions, and it seeds the first administrator from the environment, but only
 while the users table is still empty:
 
@@ -133,7 +133,7 @@ page posts them to `/api/auth/login` and stores the returned `access_token` and
 redirects you to `/`. Every page that does not explicitly say otherwise requires
 a session.
 
-The auth endpoints owned by `auth-users`:
+The auth endpoints owned by `auth`:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
