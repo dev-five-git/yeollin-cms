@@ -62,7 +62,8 @@ jobs:
 
       - name: Typecheck
         run: |
-          for pkg in packages/app apps/example-app plugins/example-plugin plugins/example-memo-plugin; do
+          for pkg in packages/app apps/example-app plugins/*/; do
+            [ -f "$pkg/tsconfig.json" ] || continue
             echo "::group::tsc $pkg"
             (cd "$pkg" && bun x tsc --noEmit)
             echo "::endgroup::"
