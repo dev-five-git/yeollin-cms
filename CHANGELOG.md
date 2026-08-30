@@ -21,6 +21,8 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Added
 
+- Typed event hooks: plugin authors implement `Event` for serializable payloads, emit through an `EventTransaction`, and register exact-name Inline or Deferred subscribers in plugin metadata.
+- A transactional `events` outbox persists events with the action, aborts the action when an Inline subscriber fails, and delivers Deferred subscribers after commit through a notify-driven drainer with polling recovery.
 - Typed plugin settings: `settings: MySettings` registers a `Serialize + Deserialize + Schema + Default` contract, persists one validated JSON row per plugin, generates administrator-only GET/PUT endpoints, and exposes a `SettingsStore` Axum extension for typed reads.
 - Settings pages are generated from the Vespera schema during prebuild. A plugin can replace its generated form with `app/settings/page.tsx`, and the shell settings page now links only to real plugin configuration surfaces.
 - Account management in the `auth` plugin: `POST /api/auth/users` creates, `PATCH /api/auth/users/{id}` changes a role, `DELETE /api/auth/users/{id}` removes an account and its sessions, `POST /api/auth/password` changes your own, and `POST /api/auth/users/{id}/password` lets an administrator reset another. Every one is administrator-only except changing your own password, which requires the current one.

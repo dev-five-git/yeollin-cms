@@ -8,6 +8,7 @@ use std::net::TcpListener;
 use std::process::Stdio;
 use std::time::Duration;
 
+use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
 use serde_json::Value;
 use tempfile::TempDir;
 use tokio::process::{Child, Command};
@@ -73,6 +74,16 @@ async fn start() -> Server {
 impl Server {
     fn url(&self, path: &str) -> String {
         format!("{}{path}", self.base)
+    }
+
+    fn database_url(&self) -> String {
+        let path = self
+            ._workdir
+            .path()
+            .join("db.sqlite")
+            .to_string_lossy()
+            .replace('\\', "/");
+        format!("sqlite://{path}?mode=ro")
     }
 }
 
@@ -316,6 +327,42 @@ async fn assembled_system_validates_and_persists_plugin_settings() {
         .await
         .unwrap();
     assert_eq!(denied.status(), 403, "settings require the admin role");
+}
+
+#[tokio::test]
+async fn assembled_system_commits_memo_events_to_the_outbox() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+    let token = admin_token(&client, &server).await;
+
+    let created = client
+        .post(server.url("/api/example-memo-plugin"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Transactional event",
+            "content": "The event must commit with this memo",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), 200);
+    let memo: Value = created.json().await.unwrap();
+
+    let db = Database::connect(server.database_url()).await.unwrap();
+    let row = db
+        .query_one_raw(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT name, payload FROM events ORDER BY id DESC LIMIT 1",
+        ))
+        .await
+        .unwrap()
+        .expect("memo write must leave an outbox event");
+    let name: String = row.try_get("", "name").unwrap();
+    let payload: Value = row.try_get("", "payload").unwrap();
+
+    assert_eq!(name, "memo.created");
+    assert_eq!(payload["memo"]["id"], memo["id"]);
+    assert_eq!(payload["memo"]["title"], "Transactional event");
 }
 
 #[tokio::test]

@@ -5,7 +5,7 @@ use axum::Router;
 use sea_orm::DatabaseConnection;
 use std::future::Future;
 use std::pin::Pin;
-use yeollin_core::SettingsRegistration;
+use yeollin_core::{SettingsRegistration, SubscriberRegistration};
 
 /// Type alias for plugin initialization function
 /// Called when plugin is loaded with database connection available
@@ -37,6 +37,8 @@ pub struct PluginMetadata {
     pub on_init: Option<PluginInitFn>,
     /// Optional typed settings contract.
     pub settings: Option<SettingsRegistration>,
+    /// Observe-only event subscribers owned by this plugin.
+    pub subscribers: Vec<SubscriberRegistration>,
 }
 
 impl PluginMetadata {
@@ -53,6 +55,7 @@ impl PluginMetadata {
             frontend_path: None,
             on_init: None,
             settings: None,
+            subscribers: vec![],
         }
     }
 }
@@ -69,6 +72,7 @@ pub struct PluginMetadataBuilder {
     frontend_path: Option<&'static str>,
     on_init: Option<PluginInitFn>,
     settings: Option<SettingsRegistration>,
+    subscribers: Vec<SubscriberRegistration>,
 }
 
 impl PluginMetadataBuilder {
@@ -135,6 +139,12 @@ impl PluginMetadataBuilder {
         self
     }
 
+    /// Add an Inline or Deferred event subscriber.
+    pub fn subscriber(mut self, subscriber: SubscriberRegistration) -> Self {
+        self.subscribers.push(subscriber);
+        self
+    }
+
     /// Build the plugin metadata
     pub fn build(self) -> PluginMetadata {
         PluginMetadata {
@@ -148,6 +158,29 @@ impl PluginMetadataBuilder {
             frontend_path: self.frontend_path,
             on_init: self.on_init,
             settings: self.settings,
+            subscribers: self.subscribers,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builder_retains_classified_subscribers() {
+        let metadata = PluginMetadata::builder("example", "1.0.0")
+            .subscriber(SubscriberRegistration::deferred(
+                "observer",
+                ["memo.created"],
+                |_event, _db| async { Ok(()) },
+            ))
+            .build();
+
+        assert_eq!(metadata.subscribers.len(), 1);
+        assert_eq!(
+            metadata.subscribers[0].mode(),
+            yeollin_core::SubscriberMode::Deferred
+        );
     }
 }

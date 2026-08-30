@@ -214,12 +214,6 @@ impl SettingsStore {
     }
 }
 
-/// Apply framework-owned settings migrations before any plugin initializer runs.
-pub async fn migrate_settings(db: &DatabaseConnection) -> anyhow::Result<()> {
-    vespertide::vespertide_migration!(db).await?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,7 +238,7 @@ mod tests {
 
     async fn store() -> SettingsStore {
         let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
-        migrate_settings(&db).await.unwrap();
+        crate::migrate_core(&db).await.unwrap();
         let store = SettingsStore::new(db, [registration()]).unwrap();
         store.initialize().await.unwrap();
         store

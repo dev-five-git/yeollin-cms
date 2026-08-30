@@ -123,6 +123,9 @@ flowchart TB
 API routes and proxies everything else to the internal vinext dev server on 3000,
 including the Vite HMR WebSocket at `/__vite_hmr`.
 
-Framework-owned settings migrations run before plugin initializers. The runtime
-then installs a `SettingsStore` extension so plugin handlers read their one
-validated JSON row through the Rust type declared in `yeollin_plugin!`.
+Framework-owned settings and event-outbox migrations run before plugin
+initializers. The runtime then installs `SettingsStore` and `EventBus` Axum
+extensions. Plugin writes use `EventTransaction`: action work, the event insert,
+and Inline database-only subscribers share one transaction. Commit wakes the
+Deferred drainer, while its independent poll loop recovers committed rows after
+a process interruption. Deferred delivery is at-least-once.

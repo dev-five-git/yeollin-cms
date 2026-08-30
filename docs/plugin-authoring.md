@@ -106,6 +106,7 @@ collected automatically.
 | `frontend` | no | bool literal | `true` by default. Set `false` for an API-only plugin with no `app/` directory. |
 | `api_base` | no | string literal | Override the API namespace derived from `name`; never include `api`. |
 | `settings` | no | Rust type path | Register a typed settings contract and its generated API and page. |
+| `subscribers` | no | expression list | Register observe-only Inline or Deferred event subscribers. |
 
 Anything else is a compile error: the macro rejects unknown fields.
 
@@ -198,6 +199,102 @@ generates `/<plugin>/settings`. To own the presentation, add
 `app/settings/page.tsx`; that exact file replaces the generated page while the
 typed API and persistence stay unchanged. Do not place the override under a
 route group.
+
+## Typed events and subscribers
+
+An event is a serializable Rust type with one stable name. The action and event
+must use the same `EventTransaction`; there is no non-transactional emit API:
+
+```rust
+use axum::{Extension, Json};
+use sea_orm::{ActiveModelTrait, Set};
+use serde::Serialize;
+use yeollin_plugin::{Event, EventBus, PluginError};
+
+#[derive(Serialize)]
+struct MemoCreated {
+    id: i32,
+}
+
+impl Event for MemoCreated {
+    const NAME: &'static str = "memo.created";
+}
+
+async fn create(
+    Extension(events): Extension<EventBus>,
+) -> Result<Json<i32>, PluginError> {
+    let mut transaction = events.begin().await?;
+    let memo = memo::ActiveModel {
+        title: Set("Typed event".to_string()),
+        ..Default::default()
+    }
+    .insert(transaction.connection())
+    .await?;
+
+    transaction.emit(&MemoCreated { id: memo.id }).await?;
+    transaction.commit().await?;
+    Ok(Json(memo.id))
+}
+```
+
+`emit` inserts the JSON envelope into the framework's `events` table, then runs
+matching Inline subscribers in that same transaction. `commit` commits the
+action and event together before it wakes Deferred delivery. The background
+drainer also polls, so a committed row is recovered after a process exits
+between commit and wake.
+
+Register subscribers with an exact event-name filter. An empty list observes
+all events:
+
+```rust
+use sea_orm::{DatabaseConnection, DatabaseTransaction};
+use yeollin_plugin::{
+    EventEnvelope, InlineSubscriberFuture, SubscriberRegistration,
+};
+
+fn record_projection(
+    event: EventEnvelope,
+    transaction: &DatabaseTransaction,
+) -> InlineSubscriberFuture<'_> {
+    Box::pin(async move {
+        // Write through `transaction`; return an error to abort the action.
+        let _ = (event, transaction);
+        Ok(())
+    })
+}
+
+async fn notify_external_system(
+    event: EventEnvelope,
+    db: DatabaseConnection,
+) -> anyhow::Result<()> {
+    // Network and filesystem work belongs here, after commit.
+    let _ = (event, db);
+    Ok(())
+}
+
+yeollin_plugin::yeollin_plugin! {
+    name: "reporting",
+    subscribers: [
+        SubscriberRegistration::inline(
+            "projection",
+            ["memo.created"],
+            record_projection,
+        ),
+        SubscriberRegistration::deferred(
+            "external-notification",
+            ["memo.created", "memo.updated"],
+            notify_external_system,
+        ),
+    ],
+}
+```
+
+Inline subscribers are intentionally narrow: they may only write to the same
+database through the supplied transaction. They must not access the network or
+filesystem, and nested event emission is rejected. Any Inline error makes the
+event transaction uncommittable and rolls it back. Deferred delivery is
+at-least-once, so Deferred handlers must be idempotent; a crash after the handler
+succeeds but before the outbox row is marked can deliver it again.
 
 ## API routes: how URLs are derived
 

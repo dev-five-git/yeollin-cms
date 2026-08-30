@@ -216,7 +216,8 @@ the process working directory. Vespertide provisions the schema during plugin
 initialisation.
 
 That file holds your users, your Argon2 password hashes, your active sessions,
-typed plugin settings, and all plugin data. Treat it as the whole application state:
+typed plugin settings, the transactional event outbox, and all plugin data.
+Treat it as the whole application state:
 
 - Back it up on a schedule, and test a restore.
 - Copy it with a SQLite-aware method rather than a naive file copy of a live
@@ -225,6 +226,12 @@ typed plugin settings, and all plugin data. Treat it as the whole application st
   hashes.
 - Pin the working directory in your service definition. A relative path means a
   different launch directory silently creates a second, empty database.
+
+Committed but unprocessed event rows are recovery state, not disposable logs.
+Do not delete them during a deployment. The Deferred drainer polls after startup
+and may deliver a row more than once if the previous process stopped after the
+subscriber succeeded but before it marked the row processed; Deferred consumers
+must therefore be idempotent.
 
 ## Known limitations
 

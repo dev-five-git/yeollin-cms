@@ -1,0 +1,55 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/model.schema.json",
+  "name": "events",
+  "description": "Transactional event outbox for inline and deferred plugin subscribers",
+  "columns": [
+    {
+      "name": "id",
+      "type": "big_int",
+      "nullable": false,
+      "primary_key": { "auto_increment": true }
+    },
+    {
+      "name": "name",
+      "type": "text",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "payload",
+      "type": "json",
+      "nullable": false
+    },
+    {
+      "name": "created_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()",
+      "index": true
+    },
+    {
+      "name": "processed_at",
+      "type": "timestamptz",
+      "nullable": true,
+      "index": true
+    },
+    {
+      "name": "delivery_attempts",
+      "type": "integer",
+      "nullable": false,
+      "default": 0
+    },
+    {
+      "name": "available_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()",
+      "index": true
+    },
+    {
+      "name": "last_error",
+      "type": "text",
+      "nullable": true
+    }
+  ]
+}

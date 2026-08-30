@@ -46,6 +46,7 @@ struct PluginDef {
     frontend: Option<bool>,
     api_base: Option<LitStr>,
     settings: Option<Path>,
+    subscribers: Vec<Expr>,
 }
 
 impl Parse for PluginDef {
@@ -57,6 +58,7 @@ impl Parse for PluginDef {
         let mut frontend: Option<bool> = None;
         let mut api_base: Option<LitStr> = None;
         let mut settings: Option<Path> = None;
+        let mut subscribers = vec![];
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -85,6 +87,13 @@ impl Parse for PluginDef {
                 "settings" => {
                     settings = Some(input.parse()?);
                 }
+                "subscribers" => {
+                    let content;
+                    bracketed!(content in input);
+                    subscribers = Punctuated::<Expr, Token![,]>::parse_terminated(&content)?
+                        .into_iter()
+                        .collect();
+                }
                 _ => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -109,6 +118,7 @@ impl Parse for PluginDef {
             frontend,
             api_base,
             settings,
+            subscribers,
         })
     }
 }
@@ -384,6 +394,9 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
             ))
         }
     });
+    let subscriber_setters = def.subscribers.iter().map(|subscriber| {
+        quote! { .subscriber(#subscriber) }
+    });
 
     let expanded = quote! {
         #settings_tokens
@@ -407,6 +420,7 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
                 #on_init_setter
                 #frontend_setters
                 #settings_setter
+                #(#subscriber_setters)*
                 .build()
         }
     };
@@ -648,6 +662,14 @@ mod api_base_tests {
             def.settings.unwrap().segments.last().unwrap().ident,
             "Settings"
         );
+    }
+
+    #[test]
+    fn accepts_subscriber_registration_expressions() {
+        let def: PluginDef =
+            syn::parse_str(r#"name: "x", subscribers: [crate::first(), crate::second()]"#).unwrap();
+
+        assert_eq!(def.subscribers.len(), 2);
     }
 }
 

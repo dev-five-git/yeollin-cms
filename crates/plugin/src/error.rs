@@ -135,6 +135,18 @@ impl From<yeollin_core::SettingsError> for PluginError {
     }
 }
 
+impl From<yeollin_core::EventError> for PluginError {
+    fn from(error: yeollin_core::EventError) -> Self {
+        match error {
+            yeollin_core::EventError::Database(error) => Self::from(error),
+            error => {
+                tracing::error!(%error, "plugin event transaction failed");
+                Self::internal()
+            }
+        }
+    }
+}
+
 /// Shorthand for helper functions that fail with a [`PluginError`].
 ///
 /// **Do not use this in a `#[vespera::route]` handler signature.** Vespera reads

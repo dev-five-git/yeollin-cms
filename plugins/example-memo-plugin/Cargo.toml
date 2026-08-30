@@ -14,3 +14,4 @@ axum = { workspace = true }
 chrono = { workspace = true }
 vespertide = { workspace = true }
 anyhow = { workspace = true }
+tracing = { workspace = true }
