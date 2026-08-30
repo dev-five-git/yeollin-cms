@@ -43,6 +43,7 @@ tsconfig.tsbuildinfo
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+/apps/*/storage/
 
 # Agent / tooling local state
 .claude/

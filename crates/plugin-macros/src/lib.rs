@@ -47,6 +47,9 @@ struct PluginDef {
     api_base: Option<LitStr>,
     settings: Option<Path>,
     subscribers: Vec<Expr>,
+    public_api_routes: Vec<LitStr>,
+    runtime_storage: bool,
+    request_body_limit: Option<Expr>,
 }
 
 impl Parse for PluginDef {
@@ -59,6 +62,9 @@ impl Parse for PluginDef {
         let mut api_base: Option<LitStr> = None;
         let mut settings: Option<Path> = None;
         let mut subscribers = vec![];
+        let mut public_api_routes = vec![];
+        let mut runtime_storage = false;
+        let mut request_body_limit = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -94,6 +100,21 @@ impl Parse for PluginDef {
                         .into_iter()
                         .collect();
                 }
+                "public_api_routes" => {
+                    let content;
+                    bracketed!(content in input);
+                    public_api_routes =
+                        Punctuated::<LitStr, Token![,]>::parse_terminated(&content)?
+                            .into_iter()
+                            .collect();
+                }
+                "runtime_storage" => {
+                    let val: LitBool = input.parse()?;
+                    runtime_storage = val.value();
+                }
+                "request_body_limit" => {
+                    request_body_limit = Some(input.parse()?);
+                }
                 _ => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -119,6 +140,9 @@ impl Parse for PluginDef {
             api_base,
             settings,
             subscribers,
+            public_api_routes,
+            runtime_storage,
+            request_body_limit,
         })
     }
 }
@@ -167,6 +191,32 @@ fn resolve_api_prefix(def: &PluginDef) -> syn::Result<String> {
     }
 
     Ok(format!("{API_ROOT}/{}", to_kebab_case(trimmed)))
+}
+
+/// Resolve a public suffix below a plugin's API namespace.
+///
+/// Public access is path-based rather than method-based, so the namespace root
+/// itself is forbidden: making `/api/media` public for GET would also expose a
+/// POST mounted at the same path. Dynamic and query-bearing declarations are
+/// likewise incompatible with exact matching.
+fn resolve_public_api_route(api_prefix: &str, suffix: &LitStr) -> syn::Result<String> {
+    let raw = suffix.value();
+    if !raw.starts_with('/') || raw == "/" {
+        return Err(syn::Error::new(
+            suffix.span(),
+            "a public API route must be a non-root path beginning with `/`",
+        ));
+    }
+    if raw.ends_with('/')
+        || raw.contains(['?', '#', '{', '}', '*'])
+        || raw.split('/').any(|segment| matches!(segment, "." | ".."))
+    {
+        return Err(syn::Error::new(
+            suffix.span(),
+            "a public API route must be a fixed path without a trailing slash, query, fragment, wildcard, or traversal segment",
+        ));
+    }
+    Ok(format!("{api_prefix}{raw}"))
 }
 
 /// Define a Yeollin plugin with automatic OpenAPI export.
@@ -323,6 +373,38 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
         Err(error) => return TokenStream::from(error.to_compile_error()),
     };
 
+    let public_api_routes = match def
+        .public_api_routes
+        .iter()
+        .map(|suffix| resolve_public_api_route(&api_prefix, suffix))
+        .collect::<syn::Result<Vec<_>>>()
+    {
+        Ok(routes) => routes,
+        Err(error) => return TokenStream::from(error.to_compile_error()),
+    };
+    let mut unique_public_routes = std::collections::HashSet::new();
+    for route in &public_api_routes {
+        if !unique_public_routes.insert(route) {
+            return TokenStream::from(
+                syn::Error::new(
+                    name_lit.span(),
+                    format!("duplicate public API route `{route}`"),
+                )
+                .to_compile_error(),
+            );
+        }
+    }
+    let public_api_setters = public_api_routes.iter().map(|route| {
+        let route = LitStr::new(route, name_lit.span());
+        quote! { .public_api_route(#route) }
+    });
+    let runtime_storage_setter = def
+        .runtime_storage
+        .then(|| quote! { .requires_runtime_storage() });
+    let request_body_limit_setter = def.request_body_limit.as_ref().map(|limit| {
+        quote! { .request_body_limit(#limit) }
+    });
+
     let settings_tokens = def.settings.as_ref().map(|settings_type| {
         quote! {
             pub async fn __yeollin_get_plugin_settings(
@@ -421,6 +503,9 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
                 #frontend_setters
                 #settings_setter
                 #(#subscriber_setters)*
+                #(#public_api_setters)*
+                #runtime_storage_setter
+                #request_body_limit_setter
                 .build()
         }
     };
@@ -585,7 +670,8 @@ pub fn yeollin_app(input: TokenStream) -> TokenStream {
 
 #[cfg(test)]
 mod api_base_tests {
-    use super::{resolve_api_prefix, PluginDef};
+    use super::{resolve_api_prefix, resolve_public_api_route, PluginDef};
+    use syn::LitStr;
 
     fn prefix_of(declaration: &str) -> String {
         let def: PluginDef = syn::parse_str(declaration).expect("declaration must parse");
@@ -670,6 +756,29 @@ mod api_base_tests {
             syn::parse_str(r#"name: "x", subscribers: [crate::first(), crate::second()]"#).unwrap();
 
         assert_eq!(def.subscribers.len(), 2);
+    }
+
+    #[test]
+    fn resolves_fixed_public_api_routes_below_the_namespace() {
+        let def: PluginDef =
+            syn::parse_str(r#"name: "media", public_api_routes: ["/file", "/thumbnail"]"#).unwrap();
+        let prefix = resolve_api_prefix(&def).unwrap();
+
+        assert_eq!(
+            def.public_api_routes
+                .iter()
+                .map(|route| resolve_public_api_route(&prefix, route).unwrap())
+                .collect::<Vec<_>>(),
+            ["/api/media/file", "/api/media/thumbnail"]
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_public_api_routes() {
+        for suffix in ["/", "file", "/file/", "/{id}", "/../file", "/file?x=1"] {
+            let literal = LitStr::new(suffix, proc_macro2::Span::call_site());
+            assert!(resolve_public_api_route("/api/media", &literal).is_err());
+        }
     }
 }
 

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/migration.schema.json",
+  "actions": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "type": "text"
+        },
+        {
+          "index": true,
+          "name": "reference",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "original_name",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "mime_type",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "size_bytes",
+          "nullable": false,
+          "type": "big_int"
+        },
+        {
+          "name": "uploaded_by",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "default": "NOW()",
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "type": "timestamptz"
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "reference"
+          ],
+          "name": "uq_media_assets_reference",
+          "type": "unique"
+        }
+      ],
+      "table": "assets",
+      "type": "create_table"
+    }
+  ],
+  "comment": "Initial media assets",
+  "created_at": "2026-08-30T19:32:15Z",
+  "id": "d80009e9-33a0-4e0f-8b6b-0c2bc7483d9e",
+  "version": 1
+}

@@ -122,6 +122,9 @@ fn every_plugin_route_lives_under_its_declared_namespace() {
             "/api/example-memo-plugin/{id}",
             "/api/example-plugin/items/",
             "/api/example-plugin/items/{id}",
+            "/api/media",
+            "/api/media/file",
+            "/api/media/{id}",
         ]
     );
 

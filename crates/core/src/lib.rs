@@ -11,6 +11,7 @@ mod migrations;
 mod models;
 mod route;
 mod settings;
+mod storage;
 
 pub use content::*;
 pub use error::*;
@@ -20,3 +21,4 @@ pub use menu::*;
 pub use migrations::*;
 pub use route::*;
 pub use settings::*;
+pub use storage::*;

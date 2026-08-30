@@ -4,17 +4,17 @@ use crate::dev_proxy::dev_proxy_router;
 use crate::server::Server;
 use crate::state::AppState;
 use crate::static_files::static_router;
-use axum::{middleware, Extension, Json, Router};
+use axum::{extract::DefaultBodyLimit, middleware, Extension, Json, Router};
 use include_dir::Dir;
 use sea_orm::DatabaseConnection;
 use serde::Serialize;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use vespera::Schema;
 use yeollin_auth::{auth_middleware, AuthConfig, AuthState};
 use yeollin_core::{
     compile_route_manifest, EventBus, ExportEnvelope, MenuConfig, PluginInfo, RouteAccess,
-    RouteEntry, RouteSource, SettingsRegistration, SettingsStore, SubscriberRegistration,
-    EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION,
+    RouteEntry, RouteSource, RuntimeStorage, SettingsRegistration, SettingsStore,
+    SubscriberRegistration, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION,
 };
 use yeollin_plugin::PluginMetadata;
 
@@ -59,6 +59,10 @@ pub struct YeollinApp {
     settings_registrations: Vec<SettingsRegistration>,
     /// Subscribers are bound to the event bus after the database is connected.
     subscriber_registrations: Vec<SubscriberRegistration>,
+    /// Writable objects are initialized only after export mode exits.
+    runtime_storage: Option<RuntimeStorage>,
+    /// Plugins that cannot serve without runtime storage.
+    storage_required_by: Vec<String>,
 }
 
 impl YeollinApp {
@@ -88,6 +92,17 @@ impl YeollinApp {
         // and runs during prebuild without deployment secrets present.
         if let Some(auth_config) = &self.auth_config {
             auth_config.validate()?;
+        }
+
+        if self.runtime_storage.is_none() && !self.storage_required_by.is_empty() {
+            anyhow::bail!(
+                "runtime storage is required by plugins [{}]; configure it with `with_storage_dir`",
+                self.storage_required_by.join(", ")
+            );
+        }
+        if let Some(storage) = &self.runtime_storage {
+            storage.initialize().await?;
+            tracing::info!(root = %storage.root().display(), "Runtime storage initialized");
         }
 
         if self.database.is_none() {
@@ -189,6 +204,7 @@ pub struct YeollinAppBuilder {
     database: Option<DatabaseConnection>,
     app_frontend: Option<(&'static str, &'static str)>,
     database_url: Option<String>,
+    storage_dir: Option<PathBuf>,
 }
 
 impl YeollinAppBuilder {
@@ -204,6 +220,7 @@ impl YeollinAppBuilder {
             database: None,
             app_frontend: None,
             database_url: None,
+            storage_dir: None,
         }
     }
 
@@ -214,6 +231,15 @@ impl YeollinAppBuilder {
     /// effect of reading plugin information.
     pub fn with_database_url(mut self, url: impl Into<String>) -> Self {
         self.database_url = Some(url.into());
+        self
+    }
+
+    /// Configure the writable root for runtime objects such as uploaded media.
+    ///
+    /// This stores only the path while the app is built. The directory is first
+    /// created by [`YeollinApp::run`] after metadata-export mode has returned.
+    pub fn with_storage_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.storage_dir = Some(path.into());
         self
     }
 
@@ -382,6 +408,9 @@ impl YeollinAppBuilder {
         let mut settings_registrations = vec![];
         let mut subscriber_registrations = vec![];
         let mut page_routes: Vec<RouteEntry> = vec![];
+        let mut public_api_routes = vec![];
+        let mut storage_required_by = vec![];
+        let mut request_body_limit = None;
 
         if let Some((path, embedded)) = self.app_frontend {
             if std::path::Path::new(path).is_dir() {
@@ -415,6 +444,20 @@ impl YeollinAppBuilder {
                 subscribers = plugin.subscribers.len(),
                 "Merging plugin router"
             );
+
+            public_api_routes.extend(
+                plugin
+                    .public_api_routes
+                    .iter()
+                    .map(|route| route.to_string()),
+            );
+            if plugin.requires_runtime_storage {
+                storage_required_by.push(plugin.name.to_string());
+            }
+            if let Some(limit) = plugin.request_body_limit {
+                request_body_limit =
+                    Some(request_body_limit.map_or(limit, |current: usize| current.max(limit)));
+            }
 
             // Collect plugin info for export
             let settings_info = plugin
@@ -464,6 +507,7 @@ impl YeollinAppBuilder {
         let state = AppState::new(self.host, self.port);
         let shared_menus = SharedMenus(Arc::new(menus.clone()));
         let shared_plugins = SharedPlugins(Arc::new(plugins.clone()));
+        let runtime_storage = self.storage_dir.map(RuntimeStorage::new);
 
         // Add core routes with vespera
         router = router
@@ -477,6 +521,11 @@ impl YeollinAppBuilder {
         if let Some(ref db) = self.database {
             router = router.layer(Extension(db.clone()));
             tracing::info!("Database connection configured");
+        }
+
+        if let Some(ref storage) = runtime_storage {
+            router = router.layer(Extension(storage.clone()));
+            tracing::info!(root = %storage.root().display(), "Runtime storage configured");
         }
 
         // Publish the auth config so plugins can sign and verify tokens. The
@@ -495,9 +544,22 @@ impl YeollinAppBuilder {
             tracing::info!("Static file serving enabled");
         }
 
+        if let Some(bytes) = request_body_limit {
+            router = router.layer(DefaultBodyLimit::max(bytes));
+            tracing::info!(bytes, "Raised request body ceiling for plugin uploads");
+        }
+
         // Apply auth middleware if auth is configured
         // This wraps all routes including the fallback (dev proxy/static)
         if let Some(ref mut auth_config) = self.auth_config {
+            let mut public_api = 0usize;
+            for route in public_api_routes {
+                if !auth_config.public_routes.contains(&route) {
+                    auth_config.public_routes.push(route);
+                    public_api += 1;
+                }
+            }
+
             // Access comes from compiled route metadata only. Directory names such
             // as `(public)` organise files and grant nothing, so a route that
             // declares no access rule stays authenticated.
@@ -514,7 +576,12 @@ impl YeollinAppBuilder {
                     *counter += 1;
                 }
             }
-            tracing::info!(public, guest, "Applied route access rules from manifest");
+            tracing::info!(
+                public,
+                public_api,
+                guest,
+                "Applied exact route access rules"
+            );
 
             let auth_state = AuthState::new(auth_config.clone());
             router = router.layer(middleware::from_fn_with_state(auth_state, auth_middleware));
@@ -533,6 +600,8 @@ impl YeollinAppBuilder {
             database_url: self.database_url,
             settings_registrations,
             subscriber_registrations,
+            runtime_storage,
+            storage_required_by,
         }
     }
 }
