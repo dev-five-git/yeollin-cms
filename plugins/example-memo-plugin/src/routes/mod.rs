@@ -1,15 +1,17 @@
 //! Memo CRUD routes, mounted under the plugin API namespace.
 
 use axum::{extract::Path, Extension, Json};
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Order, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ConnectionTrait, DatabaseConnection, EntityTrait, Order, QueryOrder, Set,
+};
 use serde::{Deserialize, Serialize};
 use vespera::Schema;
-use yeollin_plugin::{PluginError, PluginResult};
+use yeollin_plugin::{Event, EventBus, PluginError, PluginResult};
 
 use crate::models::memo;
 
 /// Memo response
-#[derive(Serialize, Schema)]
+#[derive(Clone, Serialize, Schema)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoResponse {
     pub id: i32,
@@ -63,7 +65,40 @@ pub struct DeleteMemoResponse {
     pub deleted_id: i32,
 }
 
-async fn find_memo(db: &DatabaseConnection, id: i32) -> PluginResult<memo::Model> {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoCreated {
+    memo: MemoResponse,
+}
+
+impl Event for MemoCreated {
+    const NAME: &'static str = "memo.created";
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoUpdated {
+    memo: MemoResponse,
+}
+
+impl Event for MemoUpdated {
+    const NAME: &'static str = "memo.updated";
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoDeleted {
+    id: i32,
+}
+
+impl Event for MemoDeleted {
+    const NAME: &'static str = "memo.deleted";
+}
+
+async fn find_memo<C>(db: &C, id: i32) -> PluginResult<memo::Model>
+where
+    C: ConnectionTrait,
+{
     memo::Entity::find_by_id(id)
         .one(db)
         .await?
@@ -98,9 +133,10 @@ pub async fn get_memo(
 /// Create a new memo
 #[vespera::route(post, tags = ["memo"])]
 pub async fn create_memo(
-    Extension(db): Extension<DatabaseConnection>,
+    Extension(events): Extension<EventBus>,
     Json(req): Json<CreateMemoRequest>,
 ) -> Result<Json<MemoResponse>, PluginError> {
+    let mut transaction = events.begin().await?;
     let now = chrono::Utc::now();
     let memo = memo::ActiveModel {
         title: Set(req.title),
@@ -109,20 +145,28 @@ pub async fn create_memo(
         updated_at: Set(now.into()),
         ..Default::default()
     }
-    .insert(&db)
+    .insert(transaction.connection())
     .await?;
+    let response = MemoResponse::from(memo);
+    transaction
+        .emit(&MemoCreated {
+            memo: response.clone(),
+        })
+        .await?;
+    transaction.commit().await?;
 
-    Ok(Json(MemoResponse::from(memo)))
+    Ok(Json(response))
 }
 
 /// Update a memo
 #[vespera::route(patch, path = "/{id}", tags = ["memo"])]
 pub async fn update_memo(
-    Extension(db): Extension<DatabaseConnection>,
+    Extension(events): Extension<EventBus>,
     Path(id): Path<i32>,
     Json(req): Json<UpdateMemoRequest>,
 ) -> Result<Json<MemoResponse>, PluginError> {
-    let mut memo: memo::ActiveModel = find_memo(&db, id).await?.into();
+    let mut transaction = events.begin().await?;
+    let mut memo: memo::ActiveModel = find_memo(transaction.connection(), id).await?.into();
 
     if let Some(title) = req.title {
         memo.title = Set(title);
@@ -132,20 +176,34 @@ pub async fn update_memo(
     }
     memo.updated_at = Set(chrono::Utc::now().into());
 
-    Ok(Json(MemoResponse::from(memo.update(&db).await?)))
+    let response = MemoResponse::from(memo.update(transaction.connection()).await?);
+    transaction
+        .emit(&MemoUpdated {
+            memo: response.clone(),
+        })
+        .await?;
+    transaction.commit().await?;
+
+    Ok(Json(response))
 }
 
 /// Delete a memo
 #[vespera::route(delete, path = "/{id}", tags = ["memo"])]
 pub async fn delete_memo(
-    Extension(db): Extension<DatabaseConnection>,
+    Extension(events): Extension<EventBus>,
     Path(id): Path<i32>,
 ) -> Result<Json<DeleteMemoResponse>, PluginError> {
-    let outcome = memo::Entity::delete_by_id(id).exec(&db).await?;
+    let mut transaction = events.begin().await?;
+    let outcome = memo::Entity::delete_by_id(id)
+        .exec(transaction.connection())
+        .await?;
 
     if outcome.rows_affected == 0 {
         return Err(PluginError::not_found("Memo not found"));
     }
+
+    transaction.emit(&MemoDeleted { id }).await?;
+    transaction.commit().await?;
 
     Ok(Json(DeleteMemoResponse {
         success: true,

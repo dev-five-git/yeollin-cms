@@ -12,8 +12,9 @@ use std::sync::Arc;
 use vespera::Schema;
 use yeollin_auth::{auth_middleware, AuthConfig, AuthState};
 use yeollin_core::{
-    compile_route_manifest, ExportEnvelope, MenuConfig, PluginInfo, RouteAccess, RouteEntry,
-    RouteSource, SettingsRegistration, SettingsStore, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION,
+    compile_route_manifest, EventBus, ExportEnvelope, MenuConfig, PluginInfo, RouteAccess,
+    RouteEntry, RouteSource, SettingsRegistration, SettingsStore, SubscriberRegistration,
+    EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION,
 };
 use yeollin_plugin::PluginMetadata;
 
@@ -56,6 +57,8 @@ pub struct YeollinApp {
     database_url: Option<String>,
     /// Settings contracts are retained until a database exists at runtime.
     settings_registrations: Vec<SettingsRegistration>,
+    /// Subscribers are bound to the event bus after the database is connected.
+    subscriber_registrations: Vec<SubscriberRegistration>,
 }
 
 impl YeollinApp {
@@ -96,15 +99,27 @@ impl YeollinApp {
             }
         }
 
-        if !self.settings_registrations.is_empty() {
-            let db = self.database.clone().ok_or_else(|| {
-                anyhow::anyhow!("plugins register settings but no database is configured")
-            })?;
-            yeollin_core::migrate_settings(&db).await?;
-            let settings = SettingsStore::new(db, self.settings_registrations)?;
-            settings.initialize().await?;
-            self.router = self.router.layer(Extension(settings));
-        }
+        let event_bus = if let Some(db) = self.database.clone() {
+            yeollin_core::migrate_core(&db).await?;
+
+            if !self.settings_registrations.is_empty() {
+                let settings = SettingsStore::new(db.clone(), self.settings_registrations)?;
+                settings.initialize().await?;
+                self.router = self.router.layer(Extension(settings));
+            }
+
+            let events = EventBus::new(db, self.subscriber_registrations)?;
+            self.router = self.router.layer(Extension(events.clone()));
+            Some(events)
+        } else {
+            if !self.settings_registrations.is_empty() {
+                anyhow::bail!("plugins register settings but no database is configured");
+            }
+            if !self.subscriber_registrations.is_empty() {
+                anyhow::bail!("plugins register event subscribers but no database is configured");
+            }
+            None
+        };
 
         // Run plugin initialization callbacks if database is available
         if let Some(db) = &self.database {
@@ -132,8 +147,13 @@ impl YeollinApp {
             );
         }
 
+        let drainer = event_bus.as_ref().map(EventBus::start_drainer);
         let server = Server::new(self.router, self.state);
-        server.run().await
+        let result = server.run().await;
+        if let Some(drainer) = drainer {
+            drainer.abort();
+        }
+        result
     }
 
     /// Get all registered plugins
@@ -360,6 +380,7 @@ impl YeollinAppBuilder {
         let mut plugins = vec![];
         let mut init_callbacks = vec![];
         let mut settings_registrations = vec![];
+        let mut subscriber_registrations = vec![];
         let mut page_routes: Vec<RouteEntry> = vec![];
 
         if let Some((path, embedded)) = self.app_frontend {
@@ -391,6 +412,7 @@ impl YeollinAppBuilder {
                 plugin = plugin.name,
                 has_frontend = plugin.frontend.has_frontend(),
                 has_on_init = plugin.on_init.is_some(),
+                subscribers = plugin.subscribers.len(),
                 "Merging plugin router"
             );
 
@@ -412,6 +434,13 @@ impl YeollinAppBuilder {
             if let Some(settings) = plugin.settings {
                 settings_registrations.push(settings);
             }
+
+            subscriber_registrations.extend(
+                plugin
+                    .subscribers
+                    .into_iter()
+                    .map(|subscriber| subscriber.for_plugin(plugin.name)),
+            );
 
             // Collect on_init callback if present
             if let Some(callback) = plugin.on_init {
@@ -503,6 +532,7 @@ impl YeollinAppBuilder {
             routes: page_routes,
             database_url: self.database_url,
             settings_registrations,
+            subscriber_registrations,
         }
     }
 }

@@ -37,7 +37,10 @@ pub use serde_json;
 pub use vespera;
 pub use yeollin_auth;
 pub use yeollin_core;
-pub use yeollin_core::{SettingsError, SettingsRegistration, SettingsStore};
+pub use yeollin_core::{
+    Event, EventBus, EventEnvelope, EventError, EventTransaction, InlineSubscriberFuture,
+    SettingsError, SettingsRegistration, SettingsStore, SubscriberMode, SubscriberRegistration,
+};
 
 // Re-export commonly used auth types
 pub use yeollin_auth::{
