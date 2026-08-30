@@ -4,14 +4,28 @@
 //! plugin registration, migrations, the auth middleware, and the auth
 //! routes all have to agree for these to pass.
 
+use std::fmt::Write;
 use std::net::TcpListener;
 use std::process::Stdio;
 use std::time::Duration;
 
+use axum::{
+    body::Bytes,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    routing::post,
+    Router,
+};
+use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
 use serde_json::Value;
+use sha2::Sha256;
 use tempfile::TempDir;
-use tokio::process::{Child, Command};
+use tokio::{
+    process::{Child, Command},
+    sync::mpsc,
+    task::JoinHandle,
+};
 
 const ADMIN: &str = "admin";
 const PASSWORD: &str = "system-test-password";
@@ -22,6 +36,77 @@ struct Server {
     child: Child,
     base: String,
     _workdir: TempDir,
+}
+
+#[derive(Debug)]
+struct CapturedWebhook {
+    headers: HeaderMap,
+    body: Vec<u8>,
+}
+
+#[derive(Clone)]
+struct WebhookReceiverState {
+    captured: mpsc::UnboundedSender<CapturedWebhook>,
+}
+
+struct WebhookReceiver {
+    url: String,
+    captured: mpsc::UnboundedReceiver<CapturedWebhook>,
+    task: JoinHandle<()>,
+}
+
+impl Drop for WebhookReceiver {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+async fn capture_webhook(
+    State(state): State<WebhookReceiverState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
+    let _ = state.captured.send(CapturedWebhook {
+        headers,
+        body: body.to_vec(),
+    });
+    StatusCode::NO_CONTENT
+}
+
+async fn start_webhook_receiver() -> WebhookReceiver {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind webhook receiver");
+    let address = listener.local_addr().expect("webhook receiver address");
+    let (captured, receiver) = mpsc::unbounded_channel();
+    let state = WebhookReceiverState { captured };
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/hook", post(capture_webhook))
+                .with_state(state),
+        )
+        .await
+        .expect("serve webhook receiver");
+    });
+    WebhookReceiver {
+        url: format!("http://{address}/hook"),
+        captured: receiver,
+        task,
+    }
+}
+
+fn webhook_signature(secret: &str, body: &[u8]) -> String {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC key");
+    mac.update(body);
+    mac.finalize()
+        .into_bytes()
+        .iter()
+        .fold(String::with_capacity(64), |mut output, byte| {
+            let _ = write!(output, "{byte:02x}");
+            output
+        })
 }
 
 impl Drop for Server {
@@ -85,6 +170,10 @@ impl Server {
             .replace('\\', "/");
         format!("sqlite://{path}?mode=ro")
     }
+
+    fn writable_database_url(&self) -> String {
+        self.database_url().replace("mode=ro", "mode=rw")
+    }
 }
 
 async fn login_as(
@@ -142,7 +231,11 @@ async fn assembled_system_enforces_authentication() {
         .send()
         .await
         .unwrap();
-    assert_ne!(dev_asset.status(), 200, "dev asset paths must not bypass auth");
+    assert_ne!(
+        dev_asset.status(),
+        200,
+        "dev asset paths must not bypass auth"
+    );
 
     // Prefix widening: /health is public, /healthz is not.
     let widened = client.get(server.url("/healthz")).send().await.unwrap();
@@ -196,7 +289,11 @@ async fn assembled_system_rotates_and_revokes_refresh_tokens() {
         .send()
         .await
         .unwrap();
-    assert_eq!(replayed.status(), 401, "a spent refresh token must not work");
+    assert_eq!(
+        replayed.status(),
+        401,
+        "a spent refresh token must not work"
+    );
 
     let logout = client
         .post(server.url("/api/auth/logout"))
@@ -220,10 +317,18 @@ async fn assembled_system_enforces_role_on_admin_routes() {
     let server = start().await;
     let client = reqwest::Client::new();
 
-    let anonymous = client.get(server.url("/api/auth/users")).send().await.unwrap();
+    let anonymous = client
+        .get(server.url("/api/auth/users"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(anonymous.status(), 401, "the roster must not be public");
 
-    let tokens: Value = login(&client, &server, PASSWORD).await.json().await.unwrap();
+    let tokens: Value = login(&client, &server, PASSWORD)
+        .await
+        .json()
+        .await
+        .unwrap();
     let access = tokens["access_token"].as_str().expect("access token");
 
     let admin = client
@@ -637,7 +742,11 @@ async fn assembled_system_manages_typed_content_publication() {
         .send()
         .await
         .unwrap();
-    assert_eq!(protected.status(), 401, "collection management is protected");
+    assert_eq!(
+        protected.status(),
+        401,
+        "collection management is protected"
+    );
 
     let absent_public = client
         .get(server.url("/api/content/pages/published?slug=first-page"))
@@ -799,7 +908,10 @@ async fn assembled_system_manages_typed_content_publication() {
     assert_eq!(updated.status(), 200);
     let updated: Value = updated.json().await.unwrap();
     assert_eq!(updated["status"], "published");
-    assert_eq!(updated["fields"]["heroImage"], "media:0123456789abcdef0123456789abcdef");
+    assert_eq!(
+        updated["fields"]["heroImage"],
+        "media:0123456789abcdef0123456789abcdef"
+    );
 
     let unpublished = client
         .post(server.url(&format!("/api/content/pages/{first_id}/unpublish")))
@@ -858,7 +970,10 @@ async fn assembled_system_manages_typed_content_publication() {
         .await
         .unwrap();
     assert_eq!(audit["total"], 2);
-    assert_eq!(audit["events"][0]["payload"]["content"]["collection"], "pages");
+    assert_eq!(
+        audit["events"][0]["payload"]["content"]["collection"],
+        "pages"
+    );
 
     let deleted = client
         .delete(server.url(&format!("/api/content/pages/{first_id}")))
@@ -874,6 +989,245 @@ async fn assembled_system_manages_typed_content_publication() {
         .await
         .unwrap();
     assert_eq!(gone.status(), 404);
+}
+
+#[tokio::test]
+async fn assembled_system_configures_signs_and_retries_webhooks() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+    let mut receiver = start_webhook_receiver().await;
+
+    let anonymous = client
+        .get(server.url("/api/webhooks"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        anonymous.status(),
+        401,
+        "webhook configuration is protected"
+    );
+
+    let token = admin_token(&client, &server).await;
+    let account = client
+        .post(server.url("/api/auth/users"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "username": "webhook-reader",
+            "password": "webhook-reader-password",
+            "role": "user",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(account.status(), 200);
+    let user_tokens: Value = login_as(
+        &client,
+        &server,
+        "webhook-reader",
+        "webhook-reader-password",
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    let forbidden = client
+        .get(server.url("/api/webhooks"))
+        .bearer_auth(user_tokens["access_token"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        forbidden.status(),
+        403,
+        "webhook secrets require admin access"
+    );
+
+    let short_secret = client
+        .post(server.url("/api/webhooks"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "name": "Invalid",
+            "url": receiver.url,
+            "secret": "too-short",
+            "allowPrivateNetworks": true,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(short_secret.status(), 400);
+
+    let signing_secret = "0123456789abcdef0123456789abcdef";
+    let created = client
+        .post(server.url("/api/webhooks"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "name": "  Local receiver  ",
+            "url": receiver.url,
+            "secret": signing_secret,
+            "eventNames": ["memo.created"],
+            "allowPrivateNetworks": true,
+            "timeoutSeconds": 2,
+            "enabled": true,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), 200);
+    let webhook: Value = created.json().await.unwrap();
+    let webhook_id = webhook["id"].as_str().unwrap();
+    assert_eq!(webhook["name"], "Local receiver");
+    assert_eq!(webhook["hasSecret"], true);
+    assert!(
+        webhook.get("secret").is_none(),
+        "signing secrets are write-only"
+    );
+
+    let duplicate = client
+        .post(server.url("/api/webhooks"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "name": "Local receiver",
+            "url": "https://example.com/hook",
+            "secret": signing_secret,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), 409, "endpoint names remain unique");
+
+    let memo: Value = client
+        .post(server.url("/api/example-memo-plugin"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Webhook source",
+            "content": "Signed after commit",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let memo_id = memo["id"]
+        .as_i64()
+        .unwrap_or_else(|| panic!("memo creation failed: {memo}"));
+    let captured = tokio::time::timeout(Duration::from_secs(3), receiver.captured.recv())
+        .await
+        .expect("webhook delivery timeout")
+        .expect("webhook receiver closed");
+    assert_eq!(captured.headers["x-yeollin-event"], "memo.created");
+    assert_eq!(
+        captured.headers["x-yeollin-signature"],
+        format!(
+            "sha256={}",
+            webhook_signature(signing_secret, &captured.body)
+        )
+    );
+    let envelope: Value = serde_json::from_slice(&captured.body).unwrap();
+    assert_eq!(envelope["name"], "memo.created");
+    assert_eq!(envelope["payload"]["memo"]["id"], memo["id"]);
+
+    let updated = client
+        .patch(server.url(&format!("/api/example-memo-plugin/{memo_id}")))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "title": "Webhook source updated",
+            "content": "The exact filter excludes this event",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), 200);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), receiver.captured.recv())
+            .await
+            .is_err(),
+        "memo.updated must not pass the memo.created filter"
+    );
+
+    let listed: Value = client
+        .get(server.url("/api/webhooks/deliveries"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(listed["total"], 1);
+    assert_eq!(listed["deliveries"][0]["status"], "delivered");
+    assert_eq!(listed["deliveries"][0]["attempts"], 1);
+    let delivery_id = listed["deliveries"][0]["id"].as_str().unwrap();
+
+    let db = Database::connect(server.writable_database_url())
+        .await
+        .unwrap();
+    db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "UPDATE webhook_deliveries SET status = ?, attempts = ? WHERE id = ?",
+        [
+            "dead_letter".into(),
+            5_i32.into(),
+            delivery_id.to_string().into(),
+        ],
+    ))
+    .await
+    .unwrap();
+    db.close().await.unwrap();
+
+    let retried = client
+        .post(server.url(&format!("/api/webhooks/deliveries/{delivery_id}/retry")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(retried.status(), 200);
+    let retried: Value = retried.json().await.unwrap();
+    assert_eq!(retried["status"], "pending");
+    assert_eq!(retried["attempts"], 0);
+    tokio::time::timeout(Duration::from_secs(3), receiver.captured.recv())
+        .await
+        .expect("manual retry delivery timeout")
+        .expect("webhook receiver closed");
+
+    let replaced = client
+        .put(server.url(&format!("/api/webhooks/{webhook_id}")))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "name": "Local receiver",
+            "url": receiver.url,
+            "secret": null,
+            "eventNames": [],
+            "allowPrivateNetworks": true,
+            "timeoutSeconds": 3,
+            "enabled": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(replaced.status(), 200);
+    let replaced: Value = replaced.json().await.unwrap();
+    assert_eq!(replaced["hasSecret"], true, "omission retains the secret");
+    assert_eq!(replaced["enabled"], false);
+
+    let deleted = client
+        .delete(server.url(&format!("/api/webhooks/{webhook_id}")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), 200);
+    let after_delete: Value = client
+        .get(server.url("/api/webhooks/deliveries"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(after_delete["total"], 0, "delete removes delivery history");
 }
 
 #[tokio::test]
@@ -1027,7 +1381,10 @@ async fn assembled_system_refuses_to_lock_itself_out() {
         .json()
         .await
         .unwrap();
-    assert_eq!(identity["role"], "admin", "the refusals must not half-apply");
+    assert_eq!(
+        identity["role"], "admin",
+        "the refusals must not half-apply"
+    );
 }
 
 #[tokio::test]
@@ -1035,7 +1392,11 @@ async fn assembled_system_ends_sessions_when_a_password_changes() {
     let server = start().await;
     let client = reqwest::Client::new();
 
-    let tokens: Value = login(&client, &server, PASSWORD).await.json().await.unwrap();
+    let tokens: Value = login(&client, &server, PASSWORD)
+        .await
+        .json()
+        .await
+        .unwrap();
     let access = tokens["access_token"].as_str().expect("access token");
     let refresh = tokens["refresh_token"].as_str().expect("refresh token");
 

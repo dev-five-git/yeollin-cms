@@ -17,6 +17,7 @@ tokio::task_local! {
 }
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(5 * 60);
 const BATCH_SIZE: u64 = 100;
 const MAX_ERROR_LENGTH: usize = 1_024;
 
@@ -339,8 +340,9 @@ impl EventBus {
 
             if let Some(error) = failure {
                 active.last_error = Set(Some(truncate_error(error)));
+                let attempts = envelope_attempts(&active);
                 active.available_at = Set((chrono::Utc::now()
-                    + chrono::Duration::from_std(self.inner.poll_interval)
+                    + chrono::Duration::from_std(retry_delay(self.inner.poll_interval, attempts))
                         .unwrap_or_else(|_| chrono::Duration::seconds(1)))
                 .into());
             } else {
@@ -376,6 +378,27 @@ impl EventBus {
             .map(EventEnvelope::from)
             .collect();
         Ok((events, total))
+    }
+
+    /// Make one persisted event immediately eligible for deferred delivery again.
+    ///
+    /// Administrative dead-letter tooling uses this after resetting its own
+    /// subscriber state. The event payload is never rewritten.
+    pub async fn requeue(&self, event_id: i64) -> Result<bool, EventError> {
+        let Some(stored) = events::Entity::find_by_id(event_id)
+            .one(&self.inner.db)
+            .await?
+        else {
+            return Ok(false);
+        };
+        let mut active: events::ActiveModel = stored.into();
+        active.processed_at = Set(None);
+        active.delivery_attempts = Set(0);
+        active.available_at = Set(chrono::Utc::now().into());
+        active.last_error = Set(None);
+        active.update(&self.inner.db).await?;
+        self.wake();
+        Ok(true)
     }
 
     /// Apply an audit retention cutoff without touching pending or non-audit rows.
@@ -435,6 +458,13 @@ fn envelope_attempts(active: &events::ActiveModel) -> i32 {
 
 fn truncate_error(error: String) -> String {
     error.chars().take(MAX_ERROR_LENGTH).collect()
+}
+
+fn retry_delay(base: Duration, attempts: i32) -> Duration {
+    let exponent = u32::try_from(attempts.saturating_sub(1))
+        .unwrap_or_default()
+        .min(31);
+    base.saturating_mul(1_u32 << exponent).min(MAX_RETRY_DELAY)
 }
 
 /// An application transaction that records events and wakes delivery only after commit.
@@ -712,6 +742,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_administrator_can_requeue_a_persisted_event() {
+        let db = database().await;
+        let bus = EventBus::new(db.clone(), []).unwrap();
+        let mut transaction = bus.begin().await.unwrap();
+        let emitted = transaction
+            .emit(&TestEvent { value: "manual" })
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+        assert_eq!(bus.drain_once().await.unwrap(), 1);
+
+        assert!(bus.requeue(emitted.id).await.unwrap());
+        let stored = events::Entity::find_by_id(emitted.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stored.processed_at.is_none());
+        assert_eq!(stored.delivery_attempts, 0);
+        assert!(stored.last_error.is_none());
+        assert!(!bus.requeue(i64::MAX).await.unwrap());
+    }
+
+    #[tokio::test]
     async fn inline_subscribers_cannot_start_a_nested_event_transaction() {
         let db = database().await;
         let holder = Arc::new(OnceLock::<EventBus>::new());
@@ -761,5 +815,14 @@ mod tests {
             EventBus::new(db, [first, second]),
             Err(EventError::InvalidRegistration(_))
         ));
+    }
+
+    #[test]
+    fn deferred_retries_back_off_exponentially_and_are_capped() {
+        let base = Duration::from_secs(1);
+        assert_eq!(retry_delay(base, 1), Duration::from_secs(1));
+        assert_eq!(retry_delay(base, 2), Duration::from_secs(2));
+        assert_eq!(retry_delay(base, 3), Duration::from_secs(4));
+        assert_eq!(retry_delay(base, 20), MAX_RETRY_DELAY);
     }
 }

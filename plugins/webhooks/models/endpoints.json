@@ -1,0 +1,73 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/model.schema.json",
+  "name": "endpoints",
+  "description": "Administrator-configured signed webhook endpoints",
+  "columns": [
+    {
+      "name": "id",
+      "type": "text",
+      "nullable": false,
+      "primary_key": true
+    },
+    {
+      "name": "name",
+      "type": "text",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "url",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "secret",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "event_names",
+      "type": "json",
+      "nullable": false
+    },
+    {
+      "name": "allow_private_networks",
+      "type": "boolean",
+      "nullable": false,
+      "default": false
+    },
+    {
+      "name": "timeout_seconds",
+      "type": "integer",
+      "nullable": false,
+      "default": 5
+    },
+    {
+      "name": "enabled",
+      "type": "boolean",
+      "nullable": false,
+      "default": true,
+      "index": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()",
+      "index": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()"
+    }
+  ],
+  "constraints": [
+    {
+      "type": "unique",
+      "name": "uq_webhook_endpoints_name",
+      "columns": ["name"]
+    }
+  ]
+}

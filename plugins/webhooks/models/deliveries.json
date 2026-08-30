@@ -1,0 +1,78 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/model.schema.json",
+  "name": "deliveries",
+  "description": "Per-endpoint webhook delivery and dead-letter state",
+  "columns": [
+    {
+      "name": "id",
+      "type": "text",
+      "nullable": false,
+      "primary_key": true
+    },
+    {
+      "name": "webhook_id",
+      "type": "text",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "event_id",
+      "type": "big_int",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "event_name",
+      "type": "text",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "status",
+      "type": "text",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "attempts",
+      "type": "integer",
+      "nullable": false,
+      "default": 0
+    },
+    {
+      "name": "response_status",
+      "type": "integer",
+      "nullable": true
+    },
+    {
+      "name": "last_error",
+      "type": "text",
+      "nullable": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()",
+      "index": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()"
+    },
+    {
+      "name": "delivered_at",
+      "type": "timestamptz",
+      "nullable": true
+    }
+  ],
+  "constraints": [
+    {
+      "type": "unique",
+      "name": "uq_webhook_deliveries_endpoint_event",
+      "columns": ["webhook_id", "event_id"]
+    }
+  ]
+}

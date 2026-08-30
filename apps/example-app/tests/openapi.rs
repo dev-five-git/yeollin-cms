@@ -125,6 +125,10 @@ fn every_plugin_route_lives_under_its_declared_namespace() {
             "/api/media",
             "/api/media/file",
             "/api/media/{id}",
+            "/api/webhooks",
+            "/api/webhooks/deliveries",
+            "/api/webhooks/deliveries/{id}/retry",
+            "/api/webhooks/{id}",
         ]
     );
 

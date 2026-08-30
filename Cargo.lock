@@ -1345,19 +1345,23 @@ dependencies = [
  "anyhow",
  "audit-log",
  "auth",
+ "axum",
  "content",
  "example-memo-plugin",
  "example-plugin",
+ "hmac 0.13.0",
  "media",
  "reqwest",
  "sea-orm",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "vespera",
+ "webhooks",
  "yeollin-app",
 ]
 
@@ -4881,6 +4885,27 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webhooks"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "hmac 0.13.0",
+ "rand 0.10.2",
+ "reqwest",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "tracing",
+ "vespera",
+ "vespertide",
+ "yeollin-plugin",
 ]
 
 [[package]]
