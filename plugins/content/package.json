@@ -1,0 +1,9 @@
+{
+  "name": "@yeollin-plugin/content",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "cargo run -p yeollin-cli -- dev",
+    "build": "cargo run -p yeollin-cli -- build"
+  }
+}

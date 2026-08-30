@@ -11,7 +11,10 @@ use std::process::Stdio;
 use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, info};
-use yeollin_core::{ExportEnvelope, PluginSettingsInfo, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION};
+use yeollin_core::{
+    ContentCollectionInfo, ExportEnvelope, PluginSettingsInfo, EXPORT_ENV_VAR,
+    EXPORT_SCHEMA_VERSION,
+};
 
 use crate::template::AppTemplate;
 
@@ -871,36 +874,123 @@ async fn copy_plugin_frontends(
             copied_any = true;
         }
 
-        let Some(frontend_path) = plugin.frontend_path.as_deref() else {
-            continue;
-        };
+        if let Some(frontend_path) = plugin.frontend_path.as_deref() {
+            let frontend_dir = Path::new(frontend_path);
+            if !frontend_dir.exists() || !frontend_dir.is_dir() {
+                debug!("Plugin {} frontend path not found: {}", name, frontend_path);
+            } else {
+                let mut entries = fs::read_dir(frontend_dir).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    let entry_path = entry.path();
 
-        let frontend_dir = Path::new(frontend_path);
-        if !frontend_dir.exists() || !frontend_dir.is_dir() {
-            debug!("Plugin {} frontend path not found: {}", name, frontend_path);
-            continue;
+                    if !entry_path.is_dir() {
+                        continue;
+                    }
+
+                    let dir_name = entry.file_name();
+                    let dir_name_str = dir_name.to_str().unwrap_or("");
+
+                    if dir_name_str.starts_with('(') && dir_name_str.ends_with(')') {
+                        copy_dir_contents_parallel(&entry_path, &dest_base).await?;
+                        info!("Copied plugin frontend: {} from {}", name, dir_name_str);
+                        copied_any = true;
+                    }
+                }
+            }
         }
 
-        let mut entries = fs::read_dir(frontend_dir).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let entry_path = entry.path();
-
-            if !entry_path.is_dir() {
-                continue;
-            }
-
-            let dir_name = entry.file_name();
-            let dir_name_str = dir_name.to_str().unwrap_or("");
-
-            if dir_name_str.starts_with('(') && dir_name_str.ends_with(')') {
-                copy_dir_contents_parallel(&entry_path, &dest_base).await?;
-                info!("Copied plugin frontend: {} from {}", name, dir_name_str);
-                copied_any = true;
-            }
+        if !plugin.collections.is_empty() {
+            write_generated_content_pages(&dest_base, name, &plugin.collections).await?;
+            info!(
+                plugin = name,
+                collections = plugin.collections.len(),
+                "Generated typed content collection pages"
+            );
+            copied_any = true;
         }
     }
 
     Ok(copied_any)
+}
+
+async fn write_generated_content_pages(
+    plugin_dir: &Path,
+    plugin_name: &str,
+    collections: &[ContentCollectionInfo],
+) -> Result<()> {
+    fs::create_dir_all(plugin_dir).await?;
+    let hub_path = plugin_dir.join("page.tsx");
+    if !hub_path.exists() {
+        let plugin_name = serde_json::to_string(plugin_name)?;
+        let links = collections
+            .iter()
+            .map(|collection| {
+                Ok(format!(
+                    "  {{ label: {}, path: {} }}",
+                    serde_json::to_string(&collection.label)?,
+                    serde_json::to_string(&collection.page_path)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .join(",\n");
+        let content = format!(
+            r#"import {{ ContentCollectionsHub }} from '@/components/content/ContentCollectionsHub'
+
+const collections = [
+{links}
+]
+
+export default function ContentHubPage() {{
+  return <ContentCollectionsHub collections={{collections}} pluginName={plugin_name} />
+}}
+"#
+        );
+        fs::write(hub_path, content).await?;
+    }
+
+    for collection in collections {
+        let collection_dir = plugin_dir.join(&collection.name);
+        fs::create_dir_all(&collection_dir).await?;
+        let page_path = collection_dir.join("page.tsx");
+        if page_path.exists() {
+            anyhow::bail!(
+                "generated content page {} collides with a plugin frontend page",
+                page_path.display()
+            );
+        }
+        write_generated_content_page(&page_path, collection).await?;
+    }
+    Ok(())
+}
+
+async fn write_generated_content_page(
+    page_path: &Path,
+    collection: &ContentCollectionInfo,
+) -> Result<()> {
+    let api_path = serde_json::to_string(&collection.api_path)?;
+    let label = serde_json::to_string(&collection.label)?;
+    let schema = serde_json::to_string_pretty(&collection.schema)?;
+    let default_value = serde_json::to_string_pretty(&collection.default_value)?;
+    let content = format!(
+        r#"import {{ ContentCollectionCrud, type ContentFieldSchema }} from '@/components/content/ContentCollectionCrud'
+
+const schema = {schema} as ContentFieldSchema
+const defaultValue = {default_value} as Record<string, unknown>
+
+export default function ContentCollectionPage() {{
+  return (
+    <ContentCollectionCrud
+      apiPath={api_path}
+      defaultValue={{defaultValue}}
+      label={label}
+      schema={{schema}}
+    />
+  )
+}}
+"#
+    );
+    fs::write(page_path, content).await?;
+    Ok(())
 }
 
 async fn write_generated_settings_page(
@@ -1086,7 +1176,8 @@ mod assembly_tests {
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
     use yeollin_core::{
-        ExportEnvelope, PluginInfo, PluginSettingsInfo, EXPORT_SCHEMA_VERSION,
+        ContentCollectionInfo, ExportEnvelope, PluginInfo, PluginSettingsInfo,
+        EXPORT_SCHEMA_VERSION,
     };
 
     fn write(path: &Path, contents: &str) {
@@ -1110,6 +1201,7 @@ mod assembly_tests {
             license: None,
             frontend_path: Some(dir.to_string_lossy().into_owned()),
             settings: None,
+            collections: vec![],
         }
     }
 
@@ -1267,6 +1359,46 @@ mod assembly_tests {
         .unwrap();
         assert!(custom.contains("CustomSettings"));
         assert!(!custom.contains("PluginSettingsForm"));
+    }
+
+    #[tokio::test]
+    async fn typed_content_pages_are_generated_from_exported_schema() {
+        let tmp = TempDir::new().unwrap();
+        let (app_dir, output_dir, frontend, mut metadata) = fixture(&tmp);
+        metadata.plugins[0].collections.push(ContentCollectionInfo {
+            name: "articles".to_string(),
+            label: "Articles".to_string(),
+            order: 30,
+            schema: serde_json::json!({
+                "type": "object",
+                "properties": { "body": { "type": "string" } },
+                "required": ["body"],
+            }),
+            default_value: serde_json::json!({ "body": "" }),
+            api_path: "/api/plugin-alpha/articles".to_string(),
+            page_path: "/plugin-alpha/articles".to_string(),
+            public_api_path: "/api/plugin-alpha/articles/published".to_string(),
+        });
+
+        run_prebuild(
+            &output_dir,
+            &app_dir,
+            Some(&frontend),
+            Some(&metadata),
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let generated = std::fs::read_to_string(
+            output_dir.join("src/app/(auth)/plugin-alpha/articles/page.tsx"),
+        )
+        .unwrap();
+        assert!(generated.contains("ContentCollectionCrud"));
+        assert!(generated.contains("/api/plugin-alpha/articles"));
+        assert!(generated.contains("\"body\""));
+        assert!(generated.contains("defaultValue"));
     }
 
     #[tokio::test]

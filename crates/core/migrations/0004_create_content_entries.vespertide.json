@@ -1,0 +1,83 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/migration.schema.json",
+  "actions": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "type": "text"
+        },
+        {
+          "index": true,
+          "name": "collection",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "title",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "slug",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "index": true,
+          "name": "status",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "index": true,
+          "name": "author",
+          "nullable": false,
+          "type": "text"
+        },
+        {
+          "name": "fields",
+          "nullable": false,
+          "type": "json"
+        },
+        {
+          "default": "NOW()",
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "type": "timestamptz"
+        },
+        {
+          "default": "NOW()",
+          "name": "updated_at",
+          "nullable": false,
+          "type": "timestamptz"
+        },
+        {
+          "index": true,
+          "name": "published_at",
+          "nullable": true,
+          "type": "timestamptz"
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "collection",
+            "slug"
+          ],
+          "name": "uq_content_entries_collection_slug",
+          "type": "unique"
+        }
+      ],
+      "table": "content_entries",
+      "type": "create_table"
+    }
+  ],
+  "comment": "create content entries",
+  "created_at": "2026-08-30T20:24:26Z",
+  "id": "e5528874-f547-432f-9b69-b3b7adfa36bd",
+  "version": 4
+}

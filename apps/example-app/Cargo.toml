@@ -25,6 +25,7 @@ anyhow = { workspace = true }
 sea-orm = { workspace = true }
 audit-log = { path = "../../plugins/audit-log" }
 media = { path = "../../plugins/media" }
+content = { path = "../../plugins/content" }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json", "multipart"] }

@@ -16,7 +16,29 @@ use crate::route::RouteEntry;
 pub const EXPORT_ENV_VAR: &str = "YEOLLIN_EXPORT";
 
 /// Version of the [`ExportEnvelope`] contract.
-pub const EXPORT_SCHEMA_VERSION: u32 = 2;
+pub const EXPORT_SCHEMA_VERSION: u32 = 3;
+
+/// Build-time contract for one compile-time typed content collection.
+#[derive(Debug, Clone, Serialize, Deserialize, Schema)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentCollectionInfo {
+    /// Stable lowercase kebab-case identifier used in URLs and persistence.
+    pub name: String,
+    /// Human-readable navigation label.
+    pub label: String,
+    /// Menu ordering weight within the owning plugin.
+    pub order: i32,
+    /// Exact Vespera-generated schema for the collection-specific fields.
+    pub schema: serde_json::Value,
+    /// Serialized `Default` value used by the generated editor.
+    pub default_value: serde_json::Value,
+    /// Authenticated CRUD API root.
+    pub api_path: String,
+    /// Authenticated frontend route generated during prebuild.
+    pub page_path: String,
+    /// Exact public endpoint that returns published content by slug query.
+    pub public_api_path: String,
+}
 
 /// Build-time information used to expose a plugin's settings screen.
 #[derive(Debug, Clone, Serialize, Deserialize, Schema)]
@@ -49,6 +71,9 @@ pub struct PluginInfo {
     pub frontend_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<PluginSettingsInfo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(default = "[]")]
+    pub collections: Vec<ContentCollectionInfo>,
 }
 
 /// Everything prebuild needs from a built binary, in one document.

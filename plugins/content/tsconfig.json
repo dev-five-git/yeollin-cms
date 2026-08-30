@@ -1,0 +1,12 @@
+{
+  "extends": "../../packages/app/tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["../../packages/app/src/*"]
+    },
+    "types": [],
+    "noEmit": true
+  },
+  "include": ["types.d.ts"],
+  "exclude": ["node_modules"]
+}
