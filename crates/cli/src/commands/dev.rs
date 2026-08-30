@@ -13,11 +13,12 @@ use std::process::Stdio;
 use std::sync::mpsc;
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc as tokio_mpsc;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
+use yeollin_core::ExportEnvelope;
 
 use super::bun_command;
 use super::prebuild::{
-    detect_crate_dir, detect_current_app, export_from_binary, find_binary_path, run_prebuild,
+    detect_crate_dir, detect_current_app, export_metadata, find_binary_path, run_prebuild,
     AppFrontend,
 };
 
@@ -78,42 +79,19 @@ pub async fn run(args: DevArgs) -> Result<()> {
         }
     }
 
-    // 2. Export menus and plugins from binary (after build) IN PARALLEL
-    let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
-        let binary_path = find_binary_path(crate_path).await?;
-
-        info!("Exporting menus and plugins from binary (parallel)...");
-
-        let (menus_result, plugins_result) = tokio::join!(
-            export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS"),
-            export_from_binary(&binary_path, "YEOLLIN_EXPORT_PLUGINS")
-        );
-
-        let menus = match menus_result {
-            Ok(m) => {
-                info!("Exported menus: {}", m);
-                Some(m)
-            }
-            Err(e) => {
-                debug!("Could not export menus: {}", e);
-                None
-            }
-        };
-
-        let plugins = match plugins_result {
-            Ok(p) => {
-                info!("Exported plugins: {}", p);
-                Some(p)
-            }
-            Err(e) => {
-                debug!("Could not export plugins: {}", e);
-                None
-            }
-        };
-
-        (menus, plugins)
-    } else {
-        (None, None)
+    // 2. Export metadata from binary (after build)
+    let metadata = match crate_dir {
+        Some(ref crate_path) => {
+            let binary_path = find_binary_path(crate_path).await?;
+            let envelope = export_metadata(&binary_path).await?;
+            info!(
+                plugins = envelope.plugins.len(),
+                routes = envelope.routes.len(),
+                "Exported metadata from binary"
+            );
+            Some(envelope)
+        }
+        None => None,
     };
 
     // 3. Run prebuild if not skipped and we have frontend
@@ -123,9 +101,9 @@ pub async fn run(args: DevArgs) -> Result<()> {
         info!("Running prebuild...");
         run_prebuild(
             &yeollin_app_dir,
+            &current_dir,
             frontend.as_ref(),
-            menus_json.as_deref(),
-            plugins_json.as_deref(),
+            metadata.as_ref(),
             false,
             !args.copy_mode, // use_proxy = true by default (unless --copy-mode)
         )
@@ -210,15 +188,15 @@ pub async fn run(args: DevArgs) -> Result<()> {
     let watcher_handle = if !args.copy_mode && frontend.is_some() {
         let frontend_clone = frontend.clone().unwrap();
         let yeollin_app_dir_clone = yeollin_app_dir.clone();
-        let menus_json_clone = menus_json.clone();
-        let plugins_json_clone = plugins_json.clone();
+        let metadata_clone = metadata.clone();
+        let app_dir_clone = current_dir.clone();
 
         Some(tokio::spawn(async move {
             if let Err(e) = run_file_watcher(
                 frontend_clone,
                 yeollin_app_dir_clone,
-                menus_json_clone,
-                plugins_json_clone,
+                app_dir_clone,
+                metadata_clone,
                 restart_tx,
             )
             .await
@@ -301,6 +279,13 @@ pub async fn run(args: DevArgs) -> Result<()> {
     Ok(())
 }
 
+fn ephemeral_jwt_secret() -> String {
+    rand::random::<[u8; 48]>()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// Start the Rust API server
 async fn start_rust_server(
     crate_path: &PathBuf,
@@ -312,6 +297,14 @@ async fn start_rust_server(
         .current_dir(crate_path)
         .args(["run"])
         .env("PORT", port.to_string());
+
+    // The app refuses to start without a strong JWT secret. Mint a throwaway one
+    // per `dev` run so local work needs no setup, while a deployed binary still
+    // has to be given a real secret.
+    if std::env::var_os("JWT_SECRET").is_none() {
+        cargo_cmd.env("JWT_SECRET", ephemeral_jwt_secret());
+        info!("JWT_SECRET not set; generated an ephemeral secret for this dev session");
+    }
 
     // Enable dev proxy if we have frontend
     if let Some(frontend_port) = frontend_port {
@@ -330,8 +323,8 @@ async fn start_rust_server(
 async fn run_file_watcher(
     frontend: AppFrontend,
     output_dir: PathBuf,
-    menus_json: Option<String>,
-    plugins_json: Option<String>,
+    app_dir: PathBuf,
+    metadata: Option<ExportEnvelope>,
     restart_tx: tokio_mpsc::Sender<()>,
 ) -> Result<()> {
     let (tx, rx) = mpsc::channel();
@@ -374,9 +367,9 @@ async fn run_file_watcher(
                     // Re-run frontend linking (preserve menus and plugins)
                     if let Err(e) = run_prebuild(
                         &output_dir,
+                        &app_dir,
                         Some(&frontend),
-                        menus_json.as_deref(),
-                        plugins_json.as_deref(),
+                        metadata.as_ref(),
                         false,
                         true, // use_proxy
                     )

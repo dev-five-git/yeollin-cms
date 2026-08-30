@@ -26,6 +26,12 @@ pub enum AuthError {
 
     #[error("Unauthorized")]
     Unauthorized,
+
+    #[error(
+        "JWT secret is {len} bytes; at least {min} are required. \
+         Set JWT_SECRET to a random value, e.g. `openssl rand -base64 48`."
+    )]
+    WeakJwtSecret { len: usize, min: usize },
 }
 
 #[derive(Serialize)]
@@ -44,6 +50,9 @@ impl IntoResponse for AuthError {
             AuthError::TokenCreation(_) => (StatusCode::INTERNAL_SERVER_ERROR, "TOKEN_ERROR"),
             AuthError::PasswordHash(_) => (StatusCode::INTERNAL_SERVER_ERROR, "HASH_ERROR"),
             AuthError::Unauthorized => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED"),
+            AuthError::WeakJwtSecret { .. } => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "WEAK_JWT_SECRET")
+            }
         };
 
         let body = ErrorResponse {

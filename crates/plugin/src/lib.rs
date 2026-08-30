@@ -17,9 +17,11 @@
 //! // Plugin name "my-plugin" → export identifier `MyPlugin`
 //! ```
 
+mod error;
 mod frontend;
 mod metadata;
 
+pub use error::*;
 pub use frontend::*;
 pub use metadata::*;
 

@@ -12,3 +12,5 @@ proc-macro = true
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "3", features = ["full", "parsing"] }
+serde_json = { workspace = true }
+yeollin-core = { workspace = true }

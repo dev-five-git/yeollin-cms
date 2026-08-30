@@ -1,6 +1,5 @@
 //! Yeollin application builder
 
-use crate::auth_routes::auth_router;
 use crate::dev_proxy::dev_proxy_router;
 use crate::server::Server;
 use crate::state::AppState;
@@ -12,7 +11,10 @@ use serde::Serialize;
 use std::sync::Arc;
 use vespera::Schema;
 use yeollin_auth::{auth_middleware, AuthConfig, AuthState};
-use yeollin_core::MenuConfig;
+use yeollin_core::{
+    compile_route_manifest, ExportEnvelope, MenuConfig, PluginInfo, RouteAccess, RouteEntry,
+    RouteSource, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION,
+};
 use yeollin_plugin::PluginMetadata;
 
 /// Shared menus for Extension layer
@@ -26,21 +28,13 @@ pub struct HealthResponse {
     pub version: String,
 }
 
-/// Plugin info for export and API
-#[derive(Serialize, Clone, Schema)]
-pub struct PluginInfo {
-    pub name: String,
-    pub version: String,
-    pub author: Option<String>,
-    pub description: Option<String>,
-    pub license: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub frontend_path: Option<String>,
-}
+
 
 /// Shared plugins for Extension layer
 #[derive(Clone)]
 pub struct SharedPlugins(pub Arc<Vec<PluginInfo>>);
+
+
 
 /// Stored plugin init callback with name for logging
 pub struct PluginInitCallback {
@@ -58,24 +52,50 @@ pub struct YeollinApp {
     database: Option<DatabaseConnection>,
     /// Plugin initialization callbacks
     init_callbacks: Vec<PluginInitCallback>,
+    /// Retained so `run` can reject an unsigned-capable config before serving
+    auth_config: Option<AuthConfig>,
+    /// Compiled page routes, exported for prebuild
+    routes: Vec<RouteEntry>,
+    /// Connected lazily by `run`, so export mode touches no database
+    database_url: Option<String>,
 }
 
 impl YeollinApp {
-    /// Run the CMS server
+    /// Run the CMS server.
     ///
-    /// If YEOLLIN_EXPORT_MENUS env var is set, exports menus as JSON and exits
-    /// If YEOLLIN_EXPORT_PLUGINS env var is set, exports plugin info as JSON and exits
-    pub async fn run(self) -> anyhow::Result<()> {
-        // Check for menus export mode
-        if std::env::var("YEOLLIN_EXPORT_MENUS").is_ok() {
-            println!("{}", self.export_menus_json());
+    /// When [`EXPORT_ENV_VAR`] is set the process instead writes one
+    /// [`ExportEnvelope`] to stdout and exits. That branch is deliberately the
+    /// very first thing `run` does: prebuild invokes the binary purely to read
+    /// metadata, so it must not connect to a database, run plugin
+    /// initialisation, or require deployment secrets.
+    pub async fn run(mut self) -> anyhow::Result<()> {
+        if std::env::var_os(EXPORT_ENV_VAR).is_some() {
+            let envelope = ExportEnvelope {
+                schema_version: EXPORT_SCHEMA_VERSION,
+                plugins: self.plugins,
+                menus: self.menus,
+                routes: self.routes,
+            };
+            // Exactly one document, and nothing else, so the reader never has to
+            // guess where the payload starts.
+            println!("{}", serde_json::to_string(&envelope)?);
             return Ok(());
         }
 
-        // Check for plugins export mode
-        if std::env::var("YEOLLIN_EXPORT_PLUGINS").is_ok() {
-            println!("{}", self.export_plugins_json());
-            return Ok(());
+        // Fail before any traffic is served rather than issuing forgeable tokens.
+        // Deliberately placed after the export branch, which never signs anything
+        // and runs during prebuild without deployment secrets present.
+        if let Some(auth_config) = &self.auth_config {
+            auth_config.validate()?;
+        }
+
+        if self.database.is_none() {
+            if let Some(url) = self.database_url.take() {
+                tracing::info!("Connecting to database");
+                let db = sea_orm::Database::connect(url).await?;
+                self.router = self.router.layer(Extension(db.clone()));
+                self.database = Some(db);
+            }
         }
 
         // Run plugin initialization callbacks if database is available
@@ -139,6 +159,8 @@ pub struct YeollinAppBuilder {
     dev_proxy_port: Option<u16>,
     auth_config: Option<AuthConfig>,
     database: Option<DatabaseConnection>,
+    app_frontend: Option<(&'static str, &'static str)>,
+    database_url: Option<String>,
 }
 
 impl YeollinAppBuilder {
@@ -152,7 +174,30 @@ impl YeollinAppBuilder {
             dev_proxy_port: None,
             auth_config: None,
             database: None,
+            app_frontend: None,
+            database_url: None,
         }
+    }
+
+    /// Connect to the database when the server starts rather than at build time.
+    ///
+    /// Preferred over [`Self::with_database`]: metadata-export runs never open a
+    /// connection, so prebuild cannot create or migrate a database as a side
+    /// effect of reading plugin information.
+    pub fn with_database_url(mut self, url: impl Into<String>) -> Self {
+        self.database_url = Some(url.into());
+        self
+    }
+
+    /// Register the host application's own `app/` directory so its route
+    /// metadata contributes access rules, exactly like a plugin's.
+    ///
+    /// `embedded` holds the same routes compiled at build time and is used when
+    /// `path` is absent, which is the case for a binary running away from the
+    /// machine that built it.
+    pub fn app_frontend(mut self, path: &'static str, embedded: &'static str) -> Self {
+        self.app_frontend = Some((path, embedded));
+        self
     }
 
     /// Register a plugin
@@ -295,10 +340,37 @@ impl YeollinAppBuilder {
             }
         }
 
+        // Vite dev paths are only reachable while the dev proxy is live, so they
+        // are exempted from auth only then.
+        let dev_mode = self.dev_proxy_port.is_some();
+        if let Some(ref mut auth_config) = self.auth_config {
+            auth_config.dev_mode = dev_mode;
+        }
+
         let mut router = Router::new();
         let mut menus = vec![];
         let mut plugins = vec![];
         let mut init_callbacks = vec![];
+        let mut page_routes: Vec<RouteEntry> = vec![];
+
+        if let Some((path, embedded)) = self.app_frontend {
+            if std::path::Path::new(path).is_dir() {
+                match compile_route_manifest(&[RouteSource::app(path)]) {
+                    Ok(manifest) => page_routes.extend(manifest.routes),
+                    Err(diagnostics) => {
+                        let details = diagnostics
+                            .iter()
+                            .map(|diagnostic| format!("\n  {diagnostic}"))
+                            .collect::<String>();
+                        panic!("application has invalid route metadata:{details}");
+                    }
+                }
+            } else {
+                page_routes.extend(
+                    serde_json::from_str::<Vec<RouteEntry>>(embedded).unwrap_or_default(),
+                );
+            }
+        }
 
         // Merge external routers (e.g., vespera)
         for external_router in self.routers {
@@ -340,10 +412,7 @@ impl YeollinAppBuilder {
                 menus.push(menu.clone());
             }
 
-            // Log frontend assets
-            for tsx_file in plugin.frontend.tsx_files() {
-                tracing::debug!(file = tsx_file, "Found frontend asset");
-            }
+            page_routes.extend(plugin.frontend.routes().iter().cloned());
         }
 
         let state = AppState::new(self.host, self.port);
@@ -364,18 +433,11 @@ impl YeollinAppBuilder {
             tracing::info!("Database connection configured");
         }
 
-        // Add auth routes if auth is configured
+        // Publish the auth config so plugins can sign and verify tokens. The
+        // framework itself owns no credential store: login lives in a plugin.
         if let Some(ref auth_config) = self.auth_config {
-            let auth_config_arc = Arc::new(auth_config.clone());
-            router = router.merge(auth_router(auth_config_arc));
-            tracing::info!(
-                "Auth enabled with superadmin: {}",
-                auth_config
-                    .superadmin
-                    .as_ref()
-                    .map(|s| s.username.as_str())
-                    .unwrap_or("none")
-            );
+            router = router.layer(Extension(Arc::new(auth_config.clone())));
+            tracing::info!("Auth configured");
         }
 
         // Add static file serving or dev proxy as fallback
@@ -390,39 +452,23 @@ impl YeollinAppBuilder {
         // Apply auth middleware if auth is configured
         // This wraps all routes including the fallback (dev proxy/static)
         if let Some(ref mut auth_config) = self.auth_config {
-            // Auto-detect public routes by scanning (public) directory
-            let public_dir = std::path::Path::new(".yeollin/app/src/app/(public)");
-            if public_dir.exists() {
-                let routes = scan_routes(public_dir);
-                for route in &routes {
-                    if !auth_config.public_routes.contains(route) {
-                        auth_config.public_routes.push(route.clone());
-                    }
-                }
-                if !routes.is_empty() {
-                    tracing::info!(
-                        "Auto-detected {} public routes from (public) directory",
-                        routes.len()
-                    );
-                }
-            }
-
-            // Auto-detect guest routes by scanning (guest) directory
-            let guest_dir = std::path::Path::new(".yeollin/app/src/app/(guest)");
-            if guest_dir.exists() {
-                let routes = scan_routes(guest_dir);
-                for route in &routes {
-                    if !auth_config.guest_routes.contains(route) {
-                        auth_config.guest_routes.push(route.clone());
-                    }
-                }
-                if !routes.is_empty() {
-                    tracing::info!(
-                        "Auto-detected {} guest routes from (guest) directory",
-                        routes.len()
-                    );
+            // Access comes from compiled route metadata only. Directory names such
+            // as `(public)` organise files and grant nothing, so a route that
+            // declares no access rule stays authenticated.
+            let mut public = 0usize;
+            let mut guest = 0usize;
+            for route in &page_routes {
+                let (bucket, counter) = match route.access {
+                    RouteAccess::Public => (&mut auth_config.public_routes, &mut public),
+                    RouteAccess::Guest => (&mut auth_config.guest_routes, &mut guest),
+                    RouteAccess::Authenticated => continue,
+                };
+                if !bucket.contains(&route.path) {
+                    bucket.push(route.path.clone());
+                    *counter += 1;
                 }
             }
+            tracing::info!(public, guest, "Applied route access rules from manifest");
 
             let auth_state = AuthState::new(auth_config.clone());
             router = router.layer(middleware::from_fn_with_state(auth_state, auth_middleware));
@@ -436,6 +482,9 @@ impl YeollinAppBuilder {
             state,
             database: self.database,
             init_callbacks,
+            auth_config: self.auth_config,
+            routes: page_routes,
+            database_url: self.database_url,
         }
     }
 }
@@ -474,42 +523,4 @@ pub async fn get_plugins(Extension(plugins): Extension<SharedPlugins>) -> Json<V
     Json(public_plugins)
 }
 
-/// Scan a route group directory to find routes
-/// Works for (public), (guest), or any other route group
-fn scan_routes(dir: &std::path::Path) -> Vec<String> {
-    let mut routes = Vec::new();
 
-    fn scan_dir(dir: &std::path::Path, base: &str, routes: &mut Vec<String>) {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let name = entry.file_name().to_string_lossy().to_string();
-
-                if path.is_dir() {
-                    // Skip layout files, recurse into subdirs
-                    if !name.starts_with('_') {
-                        let new_base = if base.is_empty() {
-                            format!("/{}", name)
-                        } else {
-                            format!("{}/{}", base, name)
-                        };
-                        scan_dir(&path, &new_base, routes);
-                    }
-                } else if name.starts_with("page.") {
-                    // Found a page file - this is a route
-                    let route = if base.is_empty() {
-                        "/".to_string()
-                    } else {
-                        base.to_string()
-                    };
-                    if !routes.contains(&route) {
-                        routes.push(route);
-                    }
-                }
-            }
-        }
-    }
-
-    scan_dir(dir, "", &mut routes);
-    routes
-}

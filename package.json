@@ -23,7 +23,7 @@
   "devDependencies": {
     "@typescript/native": "npm:typescript@^7.0.2",
     "eslint-plugin-devup": "^2.1",
-    "oxlint": "^1.79",
+    "oxlint": "^1.80",
     "typescript": "npm:@typescript/typescript6@^6.0.2"
   }
 }

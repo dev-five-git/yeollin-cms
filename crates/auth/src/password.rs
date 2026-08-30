@@ -1,19 +1,13 @@
 //! Password hashing utilities
 
-use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Argon2,
-};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 
 use crate::error::AuthError;
 
-/// Hash a password using Argon2
+/// Hash a password using Argon2, salted with a fresh 16-byte value from the system RNG.
 pub fn hash_password(password: &str) -> Result<String, AuthError> {
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-
-    argon2
-        .hash_password(password.as_bytes(), &salt)
+    Argon2::default()
+        .hash_password(password.as_bytes())
         .map(|hash| hash.to_string())
         .map_err(|e| AuthError::PasswordHash(e.to_string()))
 }

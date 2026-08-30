@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/model.schema.json",
+  "name": "users",
+  "description": "Authenticated principals for auth-users",
+  "columns": [
+    {
+      "name": "id",
+      "type": "integer",
+      "nullable": false,
+      "primary_key": { "auto_increment": true }
+    },
+    {
+      "name": "username",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "password_hash",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "role",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "created_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()"
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()"
+    }
+  ],
+  "constraints": [
+    {
+      "type": "unique",
+      "name": "uq_auth_users_username",
+      "columns": ["username"]
+    }
+  ]
+}

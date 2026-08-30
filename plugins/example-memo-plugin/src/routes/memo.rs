@@ -4,6 +4,7 @@ use axum::{extract::Path, Extension, Json};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Order, QueryOrder, Set};
 use serde::{Deserialize, Serialize};
 use vespera::Schema;
+use yeollin_plugin::{PluginError, PluginResult};
 
 use crate::models::memo;
 
@@ -54,32 +55,30 @@ pub struct ListMemosResponse {
     pub total: u64,
 }
 
-/// Error response
+/// Delete memo response
 #[derive(Serialize, Schema)]
 #[serde(rename_all = "camelCase")]
-pub struct ErrorResponse {
-    pub error: String,
-    pub code: String,
+pub struct DeleteMemoResponse {
+    pub success: bool,
+    pub deleted_id: i32,
+}
+
+async fn find_memo(db: &DatabaseConnection, id: i32) -> PluginResult<memo::Model> {
+    memo::Entity::find_by_id(id)
+        .one(db)
+        .await?
+        .ok_or_else(|| PluginError::not_found("Memo not found"))
 }
 
 /// List all memos
 #[vespera::route(get, tags = ["memo"])]
 pub async fn list_memos(
     Extension(db): Extension<DatabaseConnection>,
-) -> Result<Json<ListMemosResponse>, (axum::http::StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ListMemosResponse>, PluginError> {
     let memos = memo::Entity::find()
         .order_by(memo::Column::CreatedAt, Order::Desc)
         .all(&db)
-        .await
-        .map_err(|e| {
-            (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: e.to_string(),
-                    code: "DB_ERROR".to_string(),
-                }),
-            )
-        })?;
+        .await?;
 
     let total = memos.len() as u64;
     let memos = memos.into_iter().map(MemoResponse::from).collect();
@@ -92,27 +91,8 @@ pub async fn list_memos(
 pub async fn get_memo(
     Extension(db): Extension<DatabaseConnection>,
     Path(id): Path<i32>,
-) -> Result<Json<MemoResponse>, (axum::http::StatusCode, Json<ErrorResponse>)> {
-    let memo = memo::Entity::find_by_id(id).one(&db).await.map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-                code: "DB_ERROR".to_string(),
-            }),
-        )
-    })?;
-
-    match memo {
-        Some(memo) => Ok(Json(MemoResponse::from(memo))),
-        None => Err((
-            axum::http::StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "Memo not found".to_string(),
-                code: "NOT_FOUND".to_string(),
-            }),
-        )),
-    }
+) -> Result<Json<MemoResponse>, PluginError> {
+    Ok(Json(MemoResponse::from(find_memo(&db, id).await?)))
 }
 
 /// Create a new memo
@@ -120,7 +100,7 @@ pub async fn get_memo(
 pub async fn create_memo(
     Extension(db): Extension<DatabaseConnection>,
     Json(req): Json<CreateMemoRequest>,
-) -> Result<Json<MemoResponse>, (axum::http::StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<MemoResponse>, PluginError> {
     let now = chrono::Utc::now();
     let memo = memo::ActiveModel {
         title: Set(req.title),
@@ -128,17 +108,9 @@ pub async fn create_memo(
         created_at: Set(now.into()),
         updated_at: Set(now.into()),
         ..Default::default()
-    };
-
-    let memo = memo.insert(&db).await.map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-                code: "DB_ERROR".to_string(),
-            }),
-        )
-    })?;
+    }
+    .insert(&db)
+    .await?;
 
     Ok(Json(MemoResponse::from(memo)))
 }
@@ -149,31 +121,9 @@ pub async fn update_memo(
     Extension(db): Extension<DatabaseConnection>,
     Path(id): Path<i32>,
     Json(req): Json<UpdateMemoRequest>,
-) -> Result<Json<MemoResponse>, (axum::http::StatusCode, Json<ErrorResponse>)> {
-    let memo = memo::Entity::find_by_id(id).one(&db).await.map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-                code: "DB_ERROR".to_string(),
-            }),
-        )
-    })?;
+) -> Result<Json<MemoResponse>, PluginError> {
+    let mut memo: memo::ActiveModel = find_memo(&db, id).await?.into();
 
-    let memo = match memo {
-        Some(memo) => memo,
-        None => {
-            return Err((
-                axum::http::StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "Memo not found".to_string(),
-                    code: "NOT_FOUND".to_string(),
-                }),
-            ))
-        }
-    };
-
-    let mut memo: memo::ActiveModel = memo.into();
     if let Some(title) = req.title {
         memo.title = Set(title);
     }
@@ -182,17 +132,7 @@ pub async fn update_memo(
     }
     memo.updated_at = Set(chrono::Utc::now().into());
 
-    let memo = memo.update(&db).await.map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-                code: "DB_ERROR".to_string(),
-            }),
-        )
-    })?;
-
-    Ok(Json(MemoResponse::from(memo)))
+    Ok(Json(MemoResponse::from(memo.update(&db).await?)))
 }
 
 /// Delete a memo
@@ -200,29 +140,15 @@ pub async fn update_memo(
 pub async fn delete_memo(
     Extension(db): Extension<DatabaseConnection>,
     Path(id): Path<i32>,
-) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, Json<ErrorResponse>)> {
-    let result = memo::Entity::delete_by_id(id).exec(&db).await.map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-                code: "DB_ERROR".to_string(),
-            }),
-        )
-    })?;
+) -> Result<Json<DeleteMemoResponse>, PluginError> {
+    let outcome = memo::Entity::delete_by_id(id).exec(&db).await?;
 
-    if result.rows_affected == 0 {
-        return Err((
-            axum::http::StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "Memo not found".to_string(),
-                code: "NOT_FOUND".to_string(),
-            }),
-        ));
+    if outcome.rows_affected == 0 {
+        return Err(PluginError::not_found("Memo not found"));
     }
 
-    Ok(Json(serde_json::json!({
-        "success": true,
-        "deleted_id": id
-    })))
+    Ok(Json(DeleteMemoResponse {
+        success: true,
+        deleted_id: id,
+    }))
 }

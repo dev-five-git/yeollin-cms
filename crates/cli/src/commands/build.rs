@@ -7,11 +7,11 @@ use anyhow::{Context, Result};
 use clap::Args;
 use std::process::Stdio;
 use tokio::{fs, process::Command};
-use tracing::{debug, info};
+use tracing::info;
 
 use super::bun_command;
 use super::prebuild::{
-    copy_dir_contents_parallel, detect_crate_dir, detect_current_app, export_from_binary,
+    copy_dir_contents_parallel, detect_crate_dir, detect_current_app, export_metadata,
     find_binary_path, run_prebuild,
 };
 
@@ -66,37 +66,19 @@ pub async fn run(args: BuildArgs) -> Result<()> {
         }
     }
 
-    // 2. Export menus and plugins from binary (after build)
-    let (menus_json, plugins_json) = if let Some(ref crate_path) = crate_dir {
-        let binary_path = find_binary_path(crate_path).await?;
-
-        info!("Exporting menus from binary...");
-        let menus = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_MENUS").await {
-            Ok(m) => {
-                info!("Exported menus successfully");
-                Some(m)
-            }
-            Err(e) => {
-                debug!("Could not export menus: {}", e);
-                None
-            }
-        };
-
-        info!("Exporting plugins from binary...");
-        let plugins = match export_from_binary(&binary_path, "YEOLLIN_EXPORT_PLUGINS").await {
-            Ok(p) => {
-                info!("Exported plugins successfully");
-                Some(p)
-            }
-            Err(e) => {
-                debug!("Could not export plugins: {}", e);
-                None
-            }
-        };
-
-        (menus, plugins)
-    } else {
-        (None, None)
+    // 2. Export metadata from binary (after build)
+    let metadata = match crate_dir {
+        Some(ref crate_path) => {
+            let binary_path = find_binary_path(crate_path).await?;
+            let envelope = export_metadata(&binary_path).await?;
+            info!(
+                plugins = envelope.plugins.len(),
+                routes = envelope.routes.len(),
+                "Exported metadata from binary"
+            );
+            Some(envelope)
+        }
+        None => None,
     };
 
     // 3. Run prebuild if not skipped and we have frontend
@@ -104,9 +86,9 @@ pub async fn run(args: BuildArgs) -> Result<()> {
         info!("Running prebuild...");
         run_prebuild(
             &yeollin_app_dir,
+            &current_dir,
             frontend.as_ref(),
-            menus_json.as_deref(),
-            plugins_json.as_deref(),
+            metadata.as_ref(),
             true,  // copy_mode
             false, // use_proxy - always false for production build
         )

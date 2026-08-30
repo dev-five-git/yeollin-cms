@@ -44,16 +44,20 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
     info!("Creating plugin '{}'...", plugin_name);
 
-    // Create directory structure
-    let api_dir = plugin_dir.join("api");
-    let api_src_dir = api_dir.join("src");
-    let api_routes_dir = api_src_dir.join("routes").join("api").join(&plugin_name);
+    // Flat crate layout: the manifest sits at the plugin root so that
+    // `CARGO_MANIFEST_DIR` resolves to the directory holding `app/`.
+    let src_dir = plugin_dir.join("src");
+    // The directory is both a Rust module name, which cannot contain hyphens, and
+    // the URL segment. Vespera kebab-cases snake_case segments, so `media_library`
+    // here serves `/api/media-library`.
+    let route_segment = to_rust_ident(&plugin_name);
+    let routes_dir = src_dir.join("routes").join("api").join(&route_segment);
     let app_dir = plugin_dir.join("app");
     let app_plugin_dir = app_dir.join(format!("({})", plugin_name));
 
     // Create directories in parallel
     tokio::try_join!(
-        fs::create_dir_all(&api_routes_dir),
+        fs::create_dir_all(&routes_dir),
         fs::create_dir_all(&app_plugin_dir),
     )?;
 
@@ -64,23 +68,27 @@ pub async fn run(args: InitArgs) -> Result<()> {
     let routes_api_mod_content = generate_routes_api_mod_content(&plugin_name);
     let routes_plugin_mod_content = generate_routes_plugin_mod_content(&plugin_name);
     let package_json_content = generate_package_json_content(&app_name);
+    let tsconfig_content = generate_tsconfig_content();
     let page_tsx_content = generate_page_tsx_content(&plugin_name);
+    let route_meta_content = generate_route_meta_content(&plugin_name);
 
     // Write ALL files IN PARALLEL
     tokio::try_join!(
-        fs::write(api_dir.join("Cargo.toml"), &cargo_toml_content),
-        fs::write(api_src_dir.join("lib.rs"), &lib_rs_content),
+        fs::write(plugin_dir.join("Cargo.toml"), &cargo_toml_content),
+        fs::write(src_dir.join("lib.rs"), &lib_rs_content),
+        fs::write(src_dir.join("routes").join("mod.rs"), &routes_mod_content),
         fs::write(
-            api_src_dir.join("routes").join("mod.rs"),
-            &routes_mod_content
-        ),
-        fs::write(
-            api_src_dir.join("routes").join("api").join("mod.rs"),
+            src_dir.join("routes").join("api").join("mod.rs"),
             &routes_api_mod_content
         ),
-        fs::write(api_routes_dir.join("mod.rs"), &routes_plugin_mod_content),
+        fs::write(routes_dir.join("mod.rs"), &routes_plugin_mod_content),
         fs::write(plugin_dir.join("package.json"), &package_json_content),
+        fs::write(plugin_dir.join("tsconfig.json"), &tsconfig_content),
         fs::write(app_plugin_dir.join("page.tsx"), &page_tsx_content),
+        fs::write(
+            app_plugin_dir.join("route.meta.json"),
+            &route_meta_content
+        ),
     )?;
 
     info!(
@@ -95,16 +103,19 @@ pub async fn run(args: InitArgs) -> Result<()> {
     info!("");
     info!("Next steps:");
     info!("  1. Add to workspace Cargo.toml:");
-    info!("     members = [..., \"plugins/{}/api\"]", plugin_name);
+    info!("     members = [..., \"plugins/{}\"]", plugin_name);
     info!("");
-    info!("  2. Register in your app's main.rs:");
+    info!("  2. Add to your app's Cargo.toml:");
     info!(
-        "     .register_plugin({}::metadata())",
-        app_name.replace('-', "_")
+        "     {} = {{ path = \"../../plugins/{}\" }}",
+        app_name, plugin_name
     );
     info!("");
-    info!("  3. Start development:");
-    info!("     cd plugins/{} && bun run dev", plugin_name);
+    info!("  3. Register in your app's yeollin_app! plugin list:");
+    info!("     plugins: [..., {}]", app_name.replace('-', "_"));
+    info!("");
+    info!("  4. Start development from your app directory:");
+    info!("     cargo run -p yeollin-cli -- dev");
 
     Ok(())
 }
@@ -255,6 +266,36 @@ fn generate_package_json_content(name: &str) -> String {
     "dev": "cargo run -p yeollin-cli -- dev",
     "build": "cargo run -p yeollin-cli -- build"
   }}
+}}
+"#
+    )
+}
+
+fn generate_tsconfig_content() -> String {
+    r#"{
+  "extends": "../../packages/app/tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["../../packages/app/src/*"]
+    },
+    "noEmit": true
+  },
+  "include": ["app/**/*.ts", "app/**/*.tsx"],
+  "exclude": ["node_modules"]
+}
+"#
+    .to_string()
+}
+
+fn generate_route_meta_content(name: &str) -> String {
+    let pascal_name = to_pascal_case(name);
+    // `access` is spelled out rather than left to the default so that the first
+    // thing a plugin author sees is where access is declared.
+    format!(
+        r#"{{
+  "label": "{pascal_name}",
+  "order": 50,
+  "access": "authenticated"
 }}
 "#
     )

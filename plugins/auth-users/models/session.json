@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/model.schema.json",
+  "name": "sessions",
+  "description": "Refresh-token sessions for auth-users",
+  "columns": [
+    {
+      "name": "id",
+      "type": "integer",
+      "nullable": false,
+      "primary_key": { "auto_increment": true }
+    },
+    {
+      "name": "user_id",
+      "type": "integer",
+      "nullable": false,
+      "index": true
+    },
+    {
+      "name": "refresh_token_hash",
+      "type": "text",
+      "nullable": false
+    },
+    {
+      "name": "expires_at",
+      "type": "timestamptz",
+      "nullable": false
+    },
+    {
+      "name": "revoked_at",
+      "type": "timestamptz",
+      "nullable": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamptz",
+      "nullable": false,
+      "default": "NOW()"
+    }
+  ],
+  "constraints": [
+    {
+      "type": "unique",
+      "name": "uq_auth_sessions_refresh_token_hash",
+      "columns": ["refresh_token_hash"]
+    }
+  ]
+}
