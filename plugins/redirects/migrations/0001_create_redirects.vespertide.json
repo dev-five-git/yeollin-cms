@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/migration.schema.json",
+  "actions": [
+    {
+      "type": "create_table",
+      "table": "rules",
+      "columns": [
+        { "name": "id", "type": "text", "nullable": false, "primary_key": true },
+        { "name": "source_path", "type": "text", "nullable": false, "index": true },
+        { "name": "destination_path", "type": "text", "nullable": false },
+        { "name": "enabled", "type": "boolean", "nullable": false, "default": true, "index": true },
+        { "name": "created_by", "type": "text", "nullable": false },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "NOW()", "index": true },
+        { "name": "updated_at", "type": "timestamptz", "nullable": false, "default": "NOW()" }
+      ],
+      "constraints": [
+        { "type": "unique", "name": "uq_redirects_rules_source_path", "columns": ["source_path"] }
+      ]
+    }
+  ],
+  "comment": "Create permanent URL redirect rules",
+  "created_at": "2026-08-31T10:55:00Z",
+  "id": "a12d520e-fb53-44b6-83c0-02b9e5552da0",
+  "version": 1
+}

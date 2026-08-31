@@ -1830,3 +1830,102 @@ async fn assembled_system_validates_private_form_submissions() {
     );
     assert_eq!(payload["formId"], form_id);
 }
+
+#[tokio::test]
+async fn assembled_system_redirects_legacy_pages_before_authentication() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+
+    let anonymous = client
+        .get(server.url("/api/redirects"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), 401, "redirect management is protected");
+
+    let token = admin_token(&client, &server).await;
+    let created = client
+        .post(server.url("/api/redirects"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "sourcePath": "/legacy-pricing",
+            "destinationPath": "/pricing",
+            "enabled": true,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), 200);
+    let redirect: Value = created.json().await.unwrap();
+    assert_eq!(redirect["sourcePath"], "/legacy-pricing");
+
+    let no_follow = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let legacy_page = no_follow
+        .get(server.url("/legacy-pricing?campaign=spring"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        legacy_page.status(),
+        StatusCode::PERMANENT_REDIRECT,
+        "a redirect must run before page authentication"
+    );
+    assert_eq!(legacy_page.headers()["location"], "/pricing");
+
+    let disabled = client
+        .post(server.url("/api/redirects"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "sourcePath": "/paused-legacy-page",
+            "destinationPath": "https://example.com/new-home",
+            "enabled": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(disabled.status(), 200);
+    let paused_page = no_follow
+        .get(server.url("/paused-legacy-page"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        paused_page.status(),
+        StatusCode::TEMPORARY_REDIRECT,
+        "a disabled rule must fall through to normal page authentication"
+    );
+
+    let reserved = client
+        .post(server.url("/api/redirects"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "sourcePath": "/api/legacy",
+            "destinationPath": "/pricing",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        reserved.status(),
+        400,
+        "API routes cannot be redirect sources"
+    );
+
+    let db = Database::connect(server.database_url()).await.unwrap();
+    let event = db
+        .query_one_raw(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT audit, payload FROM events WHERE name = 'redirects.changed' ORDER BY id DESC LIMIT 1",
+        ))
+        .await
+        .unwrap()
+        .expect("redirect change must be audited");
+    let audit: bool = event.try_get("", "audit").unwrap();
+    let payload: Value = event.try_get("", "payload").unwrap();
+    assert!(audit);
+    assert_eq!(payload["sourcePath"], "/paused-legacy-page");
+    assert!(payload.get("destinationPath").is_some());
+}
