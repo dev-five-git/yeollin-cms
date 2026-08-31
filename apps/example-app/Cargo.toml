@@ -28,6 +28,7 @@ media = { path = "../../plugins/media" }
 content = { path = "../../plugins/content" }
 webhooks = { path = "../../plugins/webhooks" }
 search = { path = "../../plugins/search" }
+forms = { path = "../../plugins/forms" }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json", "multipart"] }

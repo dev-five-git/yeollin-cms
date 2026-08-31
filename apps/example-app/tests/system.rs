@@ -1689,3 +1689,144 @@ async fn assembled_system_throttles_repeated_failures() {
     let correct = login(&client, &server, PASSWORD).await;
     assert_eq!(correct.status(), 429);
 }
+
+#[tokio::test]
+async fn assembled_system_validates_private_form_submissions() {
+    let server = start().await;
+    let client = reqwest::Client::new();
+
+    let anonymous = client.get(server.url("/api/forms")).send().await.unwrap();
+    assert_eq!(anonymous.status(), 401, "form management is protected");
+
+    let token = admin_token(&client, &server).await;
+    let created = client
+        .post(server.url("/api/forms"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "name": "  Contact us  ",
+            "description": "Ask a question",
+            "fields": [
+                {
+                    "id": "email",
+                    "label": "Email address",
+                    "kind": "email",
+                    "required": true,
+                    "options": [],
+                    "placeholder": "you@example.com",
+                },
+                {
+                    "id": "terms",
+                    "label": "Accept terms",
+                    "kind": "checkbox",
+                    "required": true,
+                    "options": [],
+                    "placeholder": null,
+                }
+            ],
+            "successMessage": "Thank you for getting in touch.",
+            "maxSubmissionsPerHour": 1,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), 200);
+    let form: Value = created.json().await.unwrap();
+    assert_eq!(form["name"], "Contact us");
+    let form_id = form["id"].as_str().expect("form id");
+
+    let protected = client
+        .get(server.url(&format!("/api/forms/{form_id}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        protected.status(),
+        401,
+        "only the exact public route is open"
+    );
+
+    let public: Value = client
+        .get(server.url(&format!("/api/forms/public?id={form_id}")))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(public["id"], form_id);
+    assert!(public.get("createdBy").is_none());
+    assert!(public.get("maxSubmissionsPerHour").is_none());
+
+    let unknown = client
+        .post(server.url("/api/forms/submit"))
+        .json(&serde_json::json!({
+            "formId": form_id,
+            "values": { "email": "ada@example.com", "terms": true, "unknown": "no" },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unknown.status(), 400, "unknown fields must be rejected");
+
+    let submitted = client
+        .post(server.url("/api/forms/submit"))
+        .json(&serde_json::json!({
+            "formId": form_id,
+            "values": { "email": "  ada@example.com ", "terms": true },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(submitted.status(), 200);
+    let submitted: Value = submitted.json().await.unwrap();
+    assert_eq!(
+        submitted["successMessage"],
+        "Thank you for getting in touch."
+    );
+    assert!(submitted["submissionId"].as_str().is_some());
+
+    let quota = client
+        .post(server.url("/api/forms/submit"))
+        .json(&serde_json::json!({
+            "formId": form_id,
+            "values": { "email": "another@example.com", "terms": true },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(quota.status(), 429, "the form's public quota is enforced");
+
+    let inbox: Value = client
+        .get(server.url(&format!("/api/forms/{form_id}/submissions")))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(inbox["total"], 1);
+    assert_eq!(
+        inbox["submissions"][0]["values"]["email"],
+        "ada@example.com"
+    );
+    assert_eq!(inbox["submissions"][0]["values"]["terms"], true);
+
+    let db = Database::connect(server.database_url()).await.unwrap();
+    let event = db
+        .query_one_raw(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT audit, payload FROM events WHERE name = 'forms.submitted' ORDER BY id DESC LIMIT 1",
+        ))
+        .await
+        .unwrap()
+        .expect("submission must emit an outbox event");
+    let audit: bool = event.try_get("", "audit").unwrap();
+    let payload: Value = event.try_get("", "payload").unwrap();
+    assert!(!audit, "form values must not become audit history");
+    assert!(
+        payload.get("email").is_none(),
+        "event payload must omit values"
+    );
+    assert_eq!(payload["formId"], form_id);
+}

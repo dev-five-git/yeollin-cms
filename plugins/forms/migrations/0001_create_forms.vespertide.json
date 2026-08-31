@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/migration.schema.json",
+  "actions": [
+    {
+      "type": "create_table",
+      "table": "definitions",
+      "columns": [
+        { "name": "id", "type": "text", "nullable": false, "primary_key": true },
+        { "name": "name", "type": "text", "nullable": false },
+        { "name": "description", "type": "text", "nullable": false },
+        { "name": "fields", "type": "json", "nullable": false },
+        { "name": "success_message", "type": "text", "nullable": false },
+        { "name": "enabled", "type": "boolean", "nullable": false, "default": true, "index": true },
+        { "name": "max_submissions_per_hour", "type": "integer", "nullable": false, "default": 100 },
+        { "name": "created_by", "type": "text", "nullable": false },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "NOW()", "index": true },
+        { "name": "updated_at", "type": "timestamptz", "nullable": false, "default": "NOW()" }
+      ],
+      "constraints": [
+        { "type": "unique", "name": "uq_forms_definitions_name", "columns": ["name"] }
+      ]
+    },
+    {
+      "type": "create_table",
+      "table": "submissions",
+      "columns": [
+        { "name": "id", "type": "text", "nullable": false, "primary_key": true },
+        { "name": "form_id", "type": "text", "nullable": false, "index": true },
+        { "name": "form_name", "type": "text", "nullable": false },
+        { "name": "form_fields", "type": "json", "nullable": false },
+        { "name": "values", "type": "json", "nullable": false },
+        { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "NOW()", "index": true }
+      ],
+      "constraints": []
+    }
+  ],
+  "comment": "Create public forms and validated submissions",
+  "created_at": "2026-08-31T10:00:00Z",
+  "id": "c47f4e1e-0c8d-4a4d-8754-4ed1261c4452",
+  "version": 1
+}

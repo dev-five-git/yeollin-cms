@@ -8,6 +8,10 @@ description = "CLI for Yeollin CMS - prebuild, dev, and build commands"
 [[bin]]
 name = "yeollin"
 path = "src/main.rs"
+# The framework library already owns the `yeollin` rustdoc path.  Keeping this
+# command-line binary out of rustdoc avoids a non-deterministic output collision
+# while preserving documentation checks for the public library and macros.
+doc = false
 
 [dependencies]
 # CLI

@@ -1,0 +1,6 @@
+{
+  "label": "Forms",
+  "order": 75,
+  "access": "authenticated",
+  "menu": true
+}

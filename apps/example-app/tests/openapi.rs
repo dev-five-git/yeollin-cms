@@ -55,6 +55,8 @@ fn documented_responses_reference_named_schemas() {
         ("/api/example-memo-plugin/{id}", "get"),
         ("/api/auth/login", "post"),
         ("/api/auth/me", "get"),
+        ("/api/forms", "get"),
+        ("/api/forms/public", "get"),
     ] {
         let schema = &spec["paths"][path][method]["responses"]["200"]["content"]
             ["application/json"]["schema"];
@@ -122,6 +124,11 @@ fn every_plugin_route_lives_under_its_declared_namespace() {
             "/api/example-memo-plugin/{id}",
             "/api/example-plugin/items/",
             "/api/example-plugin/items/{id}",
+            "/api/forms",
+            "/api/forms/public",
+            "/api/forms/submit",
+            "/api/forms/{id}",
+            "/api/forms/{id}/submissions",
             "/api/media",
             "/api/media/file",
             "/api/media/{id}",

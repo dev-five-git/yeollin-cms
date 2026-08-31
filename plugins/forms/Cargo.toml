@@ -1,0 +1,22 @@
+[package]
+name = "forms"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Public forms and administrator submission inbox for Yeollin CMS"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+yeollin-plugin = { workspace = true }
+vespera = { workspace = true }
+vespertide = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+sea-orm = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }

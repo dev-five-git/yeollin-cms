@@ -1,0 +1,16 @@
+{
+  "modelsDir": "models",
+  "migrationsDir": "migrations",
+  "tableNamingCase": "snake",
+  "columnNamingCase": "snake",
+  "modelFormat": "json",
+  "migrationFormat": "json",
+  "migrationFilenamePattern": "%04v_%m",
+  "modelExportDir": "src/models",
+  "seaorm": {
+    "extraEnumDerives": ["vespera::Schema"],
+    "extraModelDerives": [],
+    "enumNamingCase": "camel"
+  },
+  "prefix": "forms_"
+}
