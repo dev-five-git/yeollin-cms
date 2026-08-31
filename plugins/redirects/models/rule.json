@@ -1,0 +1,13 @@
+{
+  "name": "Rule",
+  "tableName": "rules",
+  "columns": [
+    { "name": "id", "type": "string", "primaryKey": true },
+    { "name": "sourcePath", "type": "string", "unique": true, "indexed": true },
+    { "name": "destinationPath", "type": "string" },
+    { "name": "enabled", "type": "boolean", "default": true, "indexed": true },
+    { "name": "createdBy", "type": "string" },
+    { "name": "createdAt", "type": "datetime", "default": "now", "indexed": true },
+    { "name": "updatedAt", "type": "datetime", "default": "now" }
+  ]
+}

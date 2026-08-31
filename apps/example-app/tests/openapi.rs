@@ -57,6 +57,7 @@ fn documented_responses_reference_named_schemas() {
         ("/api/auth/me", "get"),
         ("/api/forms", "get"),
         ("/api/forms/public", "get"),
+        ("/api/redirects", "get"),
     ] {
         let schema = &spec["paths"][path][method]["responses"]["200"]["content"]
             ["application/json"]["schema"];
@@ -132,6 +133,8 @@ fn every_plugin_route_lives_under_its_declared_namespace() {
             "/api/media",
             "/api/media/file",
             "/api/media/{id}",
+            "/api/redirects",
+            "/api/redirects/{id}",
             "/api/search",
             "/api/webhooks",
             "/api/webhooks/deliveries",

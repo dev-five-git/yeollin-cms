@@ -38,6 +38,41 @@ pub type PluginInitFn = Box<
         + Sync,
 >;
 
+/// A resolved, permanent redirect target contributed by a plugin.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RedirectTarget {
+    location: String,
+}
+
+impl RedirectTarget {
+    /// Create a permanent redirect to a validated location.
+    #[must_use]
+    pub fn permanent(location: impl Into<String>) -> Self {
+        Self {
+            location: location.into(),
+        }
+    }
+
+    /// HTTP location header value for this redirect.
+    #[must_use]
+    pub fn location(&self) -> &str {
+        &self.location
+    }
+}
+
+/// Plugin-owned lookup that can intercept an incoming public page path.
+///
+/// The path excludes the query string and is supplied as an owned string so a
+/// resolver can safely perform asynchronous database work.
+pub type RedirectResolver = Box<
+    dyn Fn(
+            DatabaseConnection,
+            String,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<Option<RedirectTarget>>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Plugin metadata containing all information needed to register a plugin
 pub struct PluginMetadata {
     /// Plugin name (used as identifier)
@@ -70,6 +105,8 @@ pub struct PluginMetadata {
     pub requires_runtime_storage: bool,
     /// Axum body budget required before stricter route-level validation runs.
     pub request_body_limit: Option<usize>,
+    /// Optional lookup that resolves permanent redirects before auth and static handling.
+    pub redirect_resolver: Option<RedirectResolver>,
 }
 
 impl PluginMetadata {
@@ -91,6 +128,7 @@ impl PluginMetadata {
             public_api_routes: vec![],
             requires_runtime_storage: false,
             request_body_limit: None,
+            redirect_resolver: None,
         }
     }
 }
@@ -112,6 +150,7 @@ pub struct PluginMetadataBuilder {
     public_api_routes: Vec<&'static str>,
     requires_runtime_storage: bool,
     request_body_limit: Option<usize>,
+    redirect_resolver: Option<RedirectResolver>,
 }
 
 impl PluginMetadataBuilder {
@@ -211,6 +250,20 @@ impl PluginMetadataBuilder {
         self
     }
 
+    /// Register a lookup that can permanently redirect an incoming page path.
+    ///
+    /// The application runs these lookups before authentication and its static
+    /// fallback. A plugin registering one therefore requires a database at
+    /// runtime, just like a plugin with an initialization callback.
+    pub fn redirect_resolver<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(DatabaseConnection, String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = anyhow::Result<Option<RedirectTarget>>> + Send + 'static,
+    {
+        self.redirect_resolver = Some(Box::new(move |db, path| Box::pin(f(db, path))));
+        self
+    }
+
     /// Build the plugin metadata
     pub fn build(self) -> PluginMetadata {
         PluginMetadata {
@@ -229,6 +282,7 @@ impl PluginMetadataBuilder {
             public_api_routes: self.public_api_routes,
             requires_runtime_storage: self.requires_runtime_storage,
             request_body_limit: self.request_body_limit,
+            redirect_resolver: self.redirect_resolver,
         }
     }
 }
@@ -252,5 +306,14 @@ mod tests {
             metadata.subscribers[0].mode(),
             yeollin_core::SubscriberMode::Deferred
         );
+    }
+
+    #[test]
+    fn builder_retains_a_redirect_resolver() {
+        let metadata = PluginMetadata::builder("redirects", "1.0.0")
+            .redirect_resolver(|_db, _path| async { Ok(None) })
+            .build();
+
+        assert!(metadata.redirect_resolver.is_some());
     }
 }

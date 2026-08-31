@@ -1,0 +1,22 @@
+[package]
+name = "redirects"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Permanent URL redirects for Yeollin CMS"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+yeollin-plugin = { workspace = true }
+vespera = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+sea-orm = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+vespertide = { workspace = true }

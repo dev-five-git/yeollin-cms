@@ -4,7 +4,13 @@ use crate::dev_proxy::dev_proxy_router;
 use crate::server::Server;
 use crate::state::AppState;
 use crate::static_files::static_router;
-use axum::{extract::DefaultBodyLimit, middleware, Extension, Json, Router};
+use axum::{
+    extract::{DefaultBodyLimit, Request, State},
+    http::Method,
+    middleware::{self, Next},
+    response::{IntoResponse, Redirect, Response},
+    Extension, Json, Router,
+};
 use include_dir::Dir;
 use sea_orm::DatabaseConnection;
 use serde::Serialize;
@@ -16,7 +22,7 @@ use yeollin_core::{
     RouteAccess, RouteEntry, RouteSource, RuntimeStorage, SettingsRegistration, SettingsStore,
     SubscriberRegistration, EXPORT_ENV_VAR, EXPORT_SCHEMA_VERSION,
 };
-use yeollin_plugin::PluginMetadata;
+use yeollin_plugin::{PluginMetadata, RedirectResolver};
 
 /// Shared menus for Extension layer
 #[derive(Clone)]
@@ -37,6 +43,13 @@ pub struct SharedPlugins(pub Arc<Vec<PluginInfo>>);
 pub struct PluginInitCallback {
     pub name: String,
     pub callback: yeollin_plugin::PluginInitFn,
+}
+
+/// Redirect lookups shared by the outermost request middleware.
+#[derive(Clone)]
+struct RedirectMiddlewareState {
+    resolvers: Arc<Vec<RedirectResolver>>,
+    database: Option<DatabaseConnection>,
 }
 
 /// Yeollin CMS Application
@@ -65,6 +78,8 @@ pub struct YeollinApp {
     storage_required_by: Vec<String>,
     /// Typed content collections require the shared database repository.
     content_required_by: Vec<String>,
+    /// Redirect lookups need a database before they can safely serve traffic.
+    redirects_required_by: Vec<String>,
 }
 
 impl YeollinApp {
@@ -139,6 +154,12 @@ impl YeollinApp {
                 anyhow::bail!(
                     "content collections are registered by plugins [{}] but no database is configured",
                     self.content_required_by.join(", ")
+                );
+            }
+            if !self.redirects_required_by.is_empty() {
+                anyhow::bail!(
+                    "redirect lookups are registered by plugins [{}] but no database is configured",
+                    self.redirects_required_by.join(", ")
                 );
             }
             None
@@ -419,6 +440,8 @@ impl YeollinAppBuilder {
         let mut public_api_routes = vec![];
         let mut storage_required_by = vec![];
         let mut content_required_by = vec![];
+        let mut redirects_required_by = vec![];
+        let mut redirect_resolvers = vec![];
         let mut request_body_limit = None;
         let mut collection_names = std::collections::HashSet::new();
 
@@ -480,6 +503,10 @@ impl YeollinAppBuilder {
             }
             if plugin.requires_runtime_storage {
                 storage_required_by.push(plugin.name.to_string());
+            }
+            if let Some(resolver) = plugin.redirect_resolver {
+                redirects_required_by.push(plugin.name.to_string());
+                redirect_resolvers.push(resolver);
             }
             if let Some(limit) = plugin.request_body_limit {
                 request_body_limit =
@@ -655,6 +682,23 @@ impl YeollinAppBuilder {
             tracing::info!("Auth middleware applied");
         }
 
+        // This layer is deliberately added after auth so it is outermost: a
+        // configured legacy path redirects before the auth middleware or static
+        // fallback can claim it. The database-url path installs its Extension in
+        // `run`, outside this layer; an eagerly supplied connection is retained
+        // here for the same behavior.
+        if !redirect_resolvers.is_empty() {
+            let redirect_state = RedirectMiddlewareState {
+                resolvers: Arc::new(redirect_resolvers),
+                database: self.database.clone(),
+            };
+            router = router.layer(middleware::from_fn_with_state(
+                redirect_state,
+                redirect_middleware,
+            ));
+            tracing::info!("Redirect middleware applied");
+        }
+
         YeollinApp {
             router,
             menus,
@@ -670,8 +714,57 @@ impl YeollinAppBuilder {
             runtime_storage,
             storage_required_by,
             content_required_by,
+            redirects_required_by,
         }
     }
+}
+
+/// Resolve plugin redirects before authentication and fallback routing.
+async fn redirect_middleware(
+    State(state): State<RedirectMiddlewareState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !is_redirect_candidate(request.method(), request.uri().path()) {
+        return next.run(request).await;
+    }
+
+    let Some(database) = request
+        .extensions()
+        .get::<DatabaseConnection>()
+        .cloned()
+        .or_else(|| state.database.clone())
+    else {
+        return next.run(request).await;
+    };
+    let path = request.uri().path().to_string();
+
+    for resolver in state.resolvers.iter() {
+        match resolver(database.clone(), path.clone()).await {
+            Ok(Some(target)) => return Redirect::permanent(target.location()).into_response(),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(%error, %path, "Plugin redirect lookup failed");
+            }
+        }
+    }
+
+    next.run(request).await
+}
+
+fn is_redirect_candidate(method: &Method, path: &str) -> bool {
+    matches!(*method, Method::GET | Method::HEAD)
+        && path != "/api"
+        && !path.starts_with("/api/")
+        && !path.starts_with("/_next/")
+        && !path.starts_with("/static/")
+        && !path.starts_with("/@")
+        && !path.starts_with("/__vite_hmr")
+        && !path.starts_with("/node_modules/")
+        && !path.starts_with("/src/")
+        && !path.starts_with("/df/")
+        && path != "/favicon.ico"
+        && path != "/health"
 }
 
 /// Health check endpoint
@@ -723,4 +816,31 @@ fn humanize_identifier(value: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_redirect_candidate;
+    use axum::http::Method;
+
+    #[test]
+    fn redirects_only_intercept_public_page_gets() {
+        assert!(is_redirect_candidate(&Method::GET, "/legacy-page"));
+        assert!(is_redirect_candidate(&Method::HEAD, "/legacy-page"));
+
+        for (method, path) in [
+            (&Method::POST, "/legacy-page"),
+            (&Method::GET, "/api"),
+            (&Method::GET, "/api/redirects"),
+            (&Method::GET, "/_next/static/app.js"),
+            (&Method::GET, "/src/app/page.tsx"),
+            (&Method::GET, "/favicon.ico"),
+            (&Method::GET, "/health"),
+        ] {
+            assert!(
+                !is_redirect_candidate(method, path),
+                "unexpected candidate {path}"
+            );
+        }
+    }
 }

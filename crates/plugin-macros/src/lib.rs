@@ -452,6 +452,7 @@ struct PluginDef {
     public_api_routes: Vec<LitStr>,
     runtime_storage: bool,
     request_body_limit: Option<Expr>,
+    redirect_resolver: Option<Expr>,
 }
 
 impl Parse for PluginDef {
@@ -468,6 +469,7 @@ impl Parse for PluginDef {
         let mut public_api_routes = vec![];
         let mut runtime_storage = false;
         let mut request_body_limit = None;
+        let mut redirect_resolver = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -525,6 +527,9 @@ impl Parse for PluginDef {
                 "request_body_limit" => {
                     request_body_limit = Some(input.parse()?);
                 }
+                "redirect_resolver" => {
+                    redirect_resolver = Some(input.parse()?);
+                }
                 _ => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -554,6 +559,7 @@ impl Parse for PluginDef {
             public_api_routes,
             runtime_storage,
             request_body_limit,
+            redirect_resolver,
         })
     }
 }
@@ -815,6 +821,9 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
     let request_body_limit_setter = def.request_body_limit.as_ref().map(|limit| {
         quote! { .request_body_limit(#limit) }
     });
+    let redirect_resolver_setter = def.redirect_resolver.as_ref().map(|resolver| {
+        quote! { .redirect_resolver(#resolver) }
+    });
 
     let settings_tokens = def.settings.as_ref().map(|settings_type| {
         quote! {
@@ -924,6 +933,7 @@ pub fn yeollin_plugin(input: TokenStream) -> TokenStream {
                 #(#public_api_setters)*
                 #runtime_storage_setter
                 #request_body_limit_setter
+                #redirect_resolver_setter
                 .build()
         }
     };
@@ -1180,6 +1190,15 @@ mod api_base_tests {
     }
 
     #[test]
+    fn accepts_a_redirect_resolver_expression() {
+        let def: PluginDef =
+            syn::parse_str(r#"name: "redirects", redirect_resolver: crate::resolve_redirect"#)
+                .unwrap();
+
+        assert!(def.redirect_resolver.is_some());
+    }
+
+    #[test]
     fn accepts_content_collection_registrations() {
         let def: PluginDef =
             syn::parse_str(r#"name: "content", collections: [pages::registration()]"#).unwrap();
@@ -1203,11 +1222,10 @@ mod api_base_tests {
     #[test]
     fn rejects_non_canonical_content_collection_names() {
         for name in ["", "Pages", "blog_posts", "blog/pages", "-pages"] {
-            assert!(validate_collection_name(&LitStr::new(
-                name,
-                proc_macro2::Span::call_site()
-            ))
-            .is_err());
+            assert!(
+                validate_collection_name(&LitStr::new(name, proc_macro2::Span::call_site()))
+                    .is_err()
+            );
         }
     }
 

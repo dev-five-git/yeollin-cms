@@ -1,0 +1,6 @@
+{
+  "label": "Redirects",
+  "order": 65,
+  "access": "authenticated",
+  "menu": true
+}
