@@ -23,6 +23,7 @@ The project is pre-1.0, so breaking changes can appear in any release.
 
 ### Added
 
+- The `forms` plugin adds an administrator form builder and submission inbox with a deliberately small typed field vocabulary. Enabled forms expose exact public definition and submission endpoints; the server revalidates every value, applies a per-form hourly cap, snapshots definitions with submissions, and emits a value-free `forms.submitted` outbox event so personal data cannot enter audit history or generic webhooks.
 - The `search` plugin adds an administrator search page and paginated `/api/search` endpoint backed by SQLite FTS5. Content titles receive higher relevance weight than recursively flattened scalar fields, with exact collection and publication-status filters.
 - Search startup backfills existing content and rebuilds its external-content FTS5 index. An Inline subscriber applies create, update, publish, unpublish, and delete projections in the content transaction, so index failures roll back the source write rather than creating drift.
 - The `webhooks` plugin adds administrator endpoint CRUD, write-only signing secrets, exact event-name filters, per-endpoint delivery history, five-attempt dead letters, and explicit manual retries. Successful endpoints are not resent when another endpoint fails.

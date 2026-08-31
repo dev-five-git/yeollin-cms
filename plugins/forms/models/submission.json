@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dev-five-git/vespertide/refs/heads/main/schemas/model.schema.json",
+  "name": "submissions",
+  "description": "Validated values submitted to a public form",
+  "columns": [
+    { "name": "id", "type": "text", "nullable": false, "primary_key": true },
+    { "name": "form_id", "type": "text", "nullable": false, "index": true },
+    { "name": "form_name", "type": "text", "nullable": false },
+    { "name": "form_fields", "type": "json", "nullable": false },
+    { "name": "values", "type": "json", "nullable": false },
+    { "name": "created_at", "type": "timestamptz", "nullable": false, "default": "NOW()", "index": true }
+  ]
+}

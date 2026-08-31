@@ -1349,6 +1349,7 @@ dependencies = [
  "content",
  "example-memo-plugin",
  "example-plugin",
+ "forms",
  "hmac 0.13.0",
  "media",
  "reqwest",
@@ -1449,6 +1450,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "forms"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "rand 0.10.2",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "tracing",
+ "vespera",
+ "vespertide",
+ "yeollin-plugin",
 ]
 
 [[package]]
