@@ -40,6 +40,15 @@ jobs:
         working-directory: apps/example-app
         run: cargo run -p yeollin-cli -- build --skip-backend
 
+      - name: Place prefixed assets at the Pages artifact root
+        run: |
+          base_path="${VITE_YEOLLIN_BASE_PATH#/}"
+          mv "apps/example-app/.yeollin/app/out/${base_path}/_next" \
+            apps/example-app/.yeollin/app/out/_next
+          rmdir "apps/example-app/.yeollin/app/out/${base_path}"
+          test -d apps/example-app/.yeollin/app/out/_next/static/css
+          test -d apps/example-app/.yeollin/app/out/_next/static/chunks
+
       - name: Disable Jekyll processing
         run: touch apps/example-app/.yeollin/app/out/.nojekyll
 
