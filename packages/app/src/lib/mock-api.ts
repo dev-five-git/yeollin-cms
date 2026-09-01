@@ -658,59 +658,6 @@ function mockResponse(url: URL, method: string, init?: RequestInit): Response {
   )
 }
 
-function staticRscRequestUrl(
-  input: RequestInfo | URL,
-  init: RequestInit | undefined,
-  url: URL,
-): URL | null {
-  if (
-    url.origin !== window.location.origin ||
-    (DEMO_BASE_PATH !== '' &&
-      url.pathname !== DEMO_BASE_PATH &&
-      !url.pathname.startsWith(`${DEMO_BASE_PATH}/`))
-  ) {
-    return null
-  }
-
-  const headers = new Headers(input instanceof Request ? input.headers : {})
-  new Headers(init?.headers).forEach((value, name) => headers.set(name, value))
-  if (
-    headers.get('RSC') !== '1' &&
-    !headers.get('Accept')?.includes('text/x-component')
-  ) {
-    return null
-  }
-
-  const staticUrl = new URL(url)
-  if (!staticUrl.pathname.endsWith('.rsc')) {
-    staticUrl.pathname = staticUrl.pathname.endsWith('/')
-      ? `${staticUrl.pathname}index.rsc`
-      : `${staticUrl.pathname}.rsc`
-  }
-  return staticUrl
-}
-
-function normalizeStaticRscResponse(response: Response): Response {
-  if (
-    !response.ok ||
-    response.headers.get('Content-Type')?.startsWith('text/x-component')
-  ) {
-    return response
-  }
-
-  const headers = new Headers(response.headers)
-  headers.set('Content-Type', 'text/x-component')
-
-  // GitHub Pages serves unknown extensions as application/octet-stream.
-  // Shadowing the immutable header collection preserves the fetched response's
-  // URL and body, which vinext uses when deciding whether to navigate in-app.
-  Object.defineProperty(response, 'headers', {
-    configurable: true,
-    value: headers,
-  })
-  return response
-}
-
 /** Installs the browser-only API simulator used by the public GitHub Pages demo. */
 export function installMockApi(): void {
   if (installed || typeof window === 'undefined') return
@@ -729,12 +676,7 @@ export function installMockApi(): void {
     ) {
       return mockResponse(url, method, init)
     }
-    const staticRscUrl = staticRscRequestUrl(input, init, url)
-    if (staticRscUrl === null) return nativeFetch(input, init)
-
-    const staticInput =
-      input instanceof Request ? new Request(staticRscUrl, input) : staticRscUrl
-    return normalizeStaticRscResponse(await nativeFetch(staticInput, init))
+    return nativeFetch(input, init)
   }
 }
 
