@@ -4,6 +4,7 @@ import vinext from 'vinext'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  base: process.env.VITE_YEOLLIN_BASE_PATH || '/',
   optimizeDeps: {
     exclude: ['@devup-ui/react'],
   },

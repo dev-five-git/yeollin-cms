@@ -4,6 +4,8 @@ import { Box, Flex, Text, VStack } from '@devup-ui/react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import { DEMO_MODE, demoPageHref } from '@/lib/demo-path'
+
 export default function SignInPage() {
   const router = useRouter()
   const [username, setUsername] = useState('')
@@ -37,8 +39,12 @@ export default function SignInPage() {
       document.cookie = `refresh_token=${data.refresh_token}; path=/; max-age=${60 * 60 * 24 * 7}` // 7 days
 
       // Redirect to dashboard
-      router.push('/')
-      router.refresh()
+      if (DEMO_MODE) {
+        window.location.assign(demoPageHref('/'))
+      } else {
+        router.push('/')
+        router.refresh()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {

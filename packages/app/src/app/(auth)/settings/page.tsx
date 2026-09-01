@@ -1,7 +1,8 @@
 import { Box, Flex, Grid, Text, VStack } from '@devup-ui/react'
 import { readFile } from 'fs/promises'
-import Link from 'next/link'
 import path from 'path'
+
+import { AppLink } from '@/components/common/AppLink'
 
 interface PluginInfo {
   description?: string
@@ -41,11 +42,7 @@ export default async function SettingsPage() {
 
         <Grid columns={['1fr', null, '1fr 1fr']} gap={4} w="100%">
           {configurablePlugins.map((plugin) => (
-            <Link
-              key={plugin.name}
-              href={plugin.settings!.pagePath}
-              style={{ textDecoration: 'none' }}
-            >
+            <AppLink key={plugin.name} href={plugin.settings!.pagePath}>
               <Box
                 _hover={{
                   borderColor: '$primary',
@@ -72,10 +69,10 @@ export default async function SettingsPage() {
                   {plugin.description ?? 'Configure plugin settings'}
                 </Text>
               </Box>
-            </Link>
+            </AppLink>
           ))}
 
-          <Link href="/settings/plugins" style={{ textDecoration: 'none' }}>
+          <AppLink href="/settings/plugins">
             <Box
               _hover={{
                 borderColor: '$primary',
@@ -95,7 +92,7 @@ export default async function SettingsPage() {
                 View versions, authors, and plugin metadata.
               </Text>
             </Box>
-          </Link>
+          </AppLink>
         </Grid>
       </VStack>
     </Box>

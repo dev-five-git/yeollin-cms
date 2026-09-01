@@ -1,7 +1,8 @@
 import { Box, Flex, Grid, Text, VStack } from '@devup-ui/react'
 import { readFile } from 'fs/promises'
-import Link from 'next/link'
 import path from 'path'
+
+import { AppLink } from '@/components/common/AppLink'
 
 interface PluginInfo {
   name: string
@@ -86,7 +87,7 @@ export default async function PluginsPage() {
     <Box p={6}>
       <VStack alignItems="flex-start" gap={6}>
         <Flex alignItems="center" gap={4}>
-          <Link href="/settings" style={{ textDecoration: 'none' }}>
+          <AppLink href="/settings">
             <Text
               _hover={{ color: '$primary' }}
               color="$textSecondary"
@@ -95,7 +96,7 @@ export default async function PluginsPage() {
             >
               Settings
             </Text>
-          </Link>
+          </AppLink>
           <Text color="$textTertiary">/</Text>
           <Text color="$text" typography="body">
             Plugins
