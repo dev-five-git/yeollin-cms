@@ -658,6 +658,28 @@ function mockResponse(url: URL, method: string, init?: RequestInit): Response {
   )
 }
 
+function normalizeStaticRscResponse(url: URL, response: Response): Response {
+  if (
+    !response.ok ||
+    !url.pathname.endsWith('.rsc') ||
+    response.headers.get('Content-Type')?.startsWith('text/x-component')
+  ) {
+    return response
+  }
+
+  const headers = new Headers(response.headers)
+  headers.set('Content-Type', 'text/x-component')
+
+  // GitHub Pages serves unknown extensions as application/octet-stream.
+  // Shadowing the immutable header collection preserves the fetched response's
+  // URL and body, which vinext uses when deciding whether to navigate in-app.
+  Object.defineProperty(response, 'headers', {
+    configurable: true,
+    value: headers,
+  })
+  return response
+}
+
 /** Installs the browser-only API simulator used by the public GitHub Pages demo. */
 export function installMockApi(): void {
   if (installed || typeof window === 'undefined') return
@@ -676,7 +698,7 @@ export function installMockApi(): void {
     ) {
       return mockResponse(url, method, init)
     }
-    return nativeFetch(input, init)
+    return normalizeStaticRscResponse(url, await nativeFetch(input, init))
   }
 }
 
