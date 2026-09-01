@@ -14,6 +14,8 @@ interface DemoState {
 
 const DEMO_NOW = '2026-09-01T04:30:00.000Z'
 const DEMO_BASE_PATH = import.meta.env.VITE_YEOLLIN_BASE_PATH ?? ''
+const DEMO_RSC_COMPATIBILITY_ID =
+  process.env.__VINEXT_RSC_COMPATIBILITY_ID ?? ''
 
 let installed = false
 let sequence = 100
@@ -700,6 +702,12 @@ function normalizeStaticRscResponse(response: Response): Response {
 
   const headers = new Headers(response.headers)
   headers.set('Content-Type', 'text/x-component')
+  if (DEMO_RSC_COMPATIBILITY_ID !== '') {
+    headers.set(
+      'X-Vinext-RSC-Compatibility-Id',
+      DEMO_RSC_COMPATIBILITY_ID,
+    )
+  }
 
   // GitHub Pages serves unknown extensions as application/octet-stream.
   // Shadowing the immutable header collection preserves the fetched response's
