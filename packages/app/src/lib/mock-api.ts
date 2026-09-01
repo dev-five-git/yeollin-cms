@@ -24,10 +24,6 @@ function id(prefix: string): string {
   return `${prefix}-${sequence}`
 }
 
-function demoUrl(path: string): string {
-  return `${DEMO_BASE_PATH}${path}.html`
-}
-
 function imageData(label: string, start: string, end: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${start}"/><stop offset="1" stop-color="${end}"/></linearGradient></defs><rect width="960" height="640" rx="48" fill="url(#g)"/><circle cx="760" cy="150" r="110" fill="white" opacity=".16"/><circle cx="170" cy="520" r="180" fill="white" opacity=".1"/><text x="64" y="560" fill="white" font-family="system-ui,sans-serif" font-size="54" font-weight="700">${label}</text></svg>`
   return `data:image/svg+xml,${encodeURIComponent(svg)}`
@@ -499,7 +495,7 @@ function handleSearch(path: string, method: string, url: URL) {
       subject: `${entry.collection}:${entry.id}`,
       title: entry.title,
       updatedAt: entry.updatedAt,
-      url: demoUrl('/content/pages'),
+      url: '/content/pages',
     }))
   const page = pageOf(results, url, 20)
   return json({

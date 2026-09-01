@@ -4,7 +4,6 @@ import { Box, Flex, Text } from '@devup-ui/react'
 import { usePathname } from 'next/navigation'
 
 import { AppLink } from '@/components/common/AppLink'
-import { normalizeDemoPath } from '@/lib/demo-path'
 
 interface MenuItem {
   id: string
@@ -22,7 +21,7 @@ interface NavItemProps {
  * Requires 'use client' due to usePathname hook.
  */
 export function NavItem({ item }: NavItemProps) {
-  const pathname = normalizeDemoPath(usePathname())
+  const pathname = usePathname()
   const isActive = pathname === item.path
   const hasChildren = item.children && item.children.length > 0
   const isChildActive = item.children?.some((child) => pathname === child.path)

@@ -12,6 +12,20 @@ export default defineConfig({
     DevupUI(),
     devupApi({ serverActions: false }),
     vinext({ react: { compiler: true } }),
+    {
+      name: 'yeollin-demo-base-path',
+      config() {
+        if (!process.env.VITE_YEOLLIN_BASE_PATH) return
+
+        return {
+          define: {
+            'process.env.__NEXT_ROUTER_BASEPATH': JSON.stringify(
+              process.env.VITE_YEOLLIN_BASE_PATH,
+            ),
+          },
+        }
+      },
+    },
   ],
   server: {
     host: '127.0.0.1',

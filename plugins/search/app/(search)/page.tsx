@@ -1,6 +1,7 @@
 'use client'
 
 import { Box, Flex, Grid, Text, VStack } from '@devup-ui/react'
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 type ContentStatus = 'draft' | 'published'
@@ -491,13 +492,13 @@ export default function SearchPage() {
                       </VStack>
                       <Box
                         _hover={{ bg: '$primaryLight' }}
-                        as="a"
+                        as={Link}
                         border="1px solid $primary"
                         borderRadius="8px"
                         color="$primary"
                         flexShrink={0}
                         fontWeight="600"
-                        href={result.url}
+                        props={{ href: result.url }}
                         px={3}
                         py={2}
                         textDecoration="none"
