@@ -1,5 +1,6 @@
 import { Box, Grid, Text, VStack } from '@devup-ui/react'
-import Link from 'next/link'
+
+import { AppLink } from '@/components/common/AppLink'
 
 interface ContentCollectionLink {
   label: string
@@ -38,11 +39,7 @@ export function ContentCollectionsHub({
           gridTemplateColumns={['1fr', 'repeat(2, minmax(0, 1fr))']}
         >
           {collections.map((collection) => (
-            <Link
-              key={collection.path}
-              href={collection.path}
-              style={{ textDecoration: 'none' }}
-            >
+            <AppLink key={collection.path} href={collection.path}>
               <Box
                 _hover={{
                   borderColor: '$primary',
@@ -61,7 +58,7 @@ export function ContentCollectionsHub({
                   </Text>
                 </VStack>
               </Box>
-            </Link>
+            </AppLink>
           ))}
         </Grid>
       </VStack>

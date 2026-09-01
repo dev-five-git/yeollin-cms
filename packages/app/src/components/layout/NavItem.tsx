@@ -1,8 +1,10 @@
 'use client'
 
 import { Box, Flex, Text } from '@devup-ui/react'
-import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+
+import { AppLink } from '@/components/common/AppLink'
+import { normalizeDemoPath } from '@/lib/demo-path'
 
 interface MenuItem {
   id: string
@@ -20,14 +22,14 @@ interface NavItemProps {
  * Requires 'use client' due to usePathname hook.
  */
 export function NavItem({ item }: NavItemProps) {
-  const pathname = usePathname()
+  const pathname = normalizeDemoPath(usePathname())
   const isActive = pathname === item.path
   const hasChildren = item.children && item.children.length > 0
   const isChildActive = item.children?.some((child) => pathname === child.path)
 
   return (
     <Box flexShrink={0}>
-      <Link href={item.path} style={{ textDecoration: 'none' }}>
+      <AppLink href={item.path}>
         <Flex
           _hover={{ bg: isActive ? '$primary' : '$backgroundSecondary' }}
           alignItems="center"
@@ -41,16 +43,12 @@ export function NavItem({ item }: NavItemProps) {
         >
           <Text fontSize="14px">{item.label}</Text>
         </Flex>
-      </Link>
+      </AppLink>
 
       {hasChildren && (isActive || isChildActive) && (
         <Flex flexDirection="column" gap={1} ml={[0, null, 4]} mt={1}>
           {item.children!.map((child) => (
-            <Link
-              key={child.id}
-              href={child.path}
-              style={{ textDecoration: 'none' }}
-            >
+            <AppLink key={child.id} href={child.path}>
               <Flex
                 _hover={{ bg: '$backgroundSecondary' }}
                 alignItems="center"
@@ -67,7 +65,7 @@ export function NavItem({ item }: NavItemProps) {
               >
                 <Text fontSize="13px">{child.label}</Text>
               </Flex>
-            </Link>
+            </AppLink>
           ))}
         </Flex>
       )}

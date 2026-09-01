@@ -2,11 +2,13 @@
 
 Yeollin CMS is a Tauri-inspired, plugin-based CMS *framework* rather than a finished CMS product. A plugin is a single Rust crate that bundles its Axum/Vespera API routes, a vinext (Vite + RSC, Next-compatible) frontend under `app/`, and optionally sea-orm models with vespertide JSON migrations. The `yeollin-cli` binary assembles the registered plugins into one application: it extracts the frontend template, merges each plugin's pages, statically exports the result, and embeds it into the release binary via `include_dir!`, so a deployment is a single executable that serves both the API and the UI.
 
+Try the serverless [interactive demo](https://dev-five-git.github.io/yeollin-cms/). It includes the example app's plugins and keeps all mock data inside the browser tab.
+
 ## Status
 
 > **Status: v0.1, pre-release. APIs change without notice. Not production ready.**
 >
-> This repository is private and under active development. Treat every public
+> This project is open source and under active development. Treat every public
 > interface, file layout, and CLI flag as unstable.
 
 ## Prerequisites
